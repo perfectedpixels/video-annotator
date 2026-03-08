@@ -1,0 +1,26 @@
+CloudFront Configuration for Video Annotator
+=============================================
+
+OAI ID: E36EPMNLO0X5FY
+Distribution ID: E2BQXEPK57V6AW
+Distribution Domain: d1gmdb9bvzsem4.cloudfront.net
+
+Status: Deploying (takes 15-30 minutes)
+
+Check deployment status:
+  aws cloudfront get-distribution --id E2BQXEPK57V6AW | jq -r '.Distribution.Status'
+
+When status is "Deployed", the distribution is ready to use.
+
+Next Steps:
+1. Create CloudFront key pair (must be done by root account user in AWS Console)
+   - Go to: https://console.aws.amazon.com/iam/home#/security_credentials
+   - Section: CloudFront key pairs
+   - Click: Create New Key Pair
+   - Download private key and note Key Pair ID
+
+2. Update server code with CloudFront configuration
+   - See: update-server-for-cloudfront.sh
+
+3. Test CloudFront URLs
+   - See: test-cloudfront.sh

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Annotator Icon Options</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 2.5em;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        .option {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+        .option:hover {
+            transform: translateY(-5px);
+        }
+        .option h2 {
+            color: #8b5cf6;
+            margin: 20px 0 10px 0;
+            font-size: 1.3em;
+        }
+        .option p {
+            color: #666;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .icon-large {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto;
+        }
+        .icon-small {
+            width: 32px;
+            height: 32px;
+            display: inline-block;
+            margin: 10px 5px;
+        }
+        .current {
+            border: 3px solid #fbbf24;
+        }
+        .current h2::after {
+            content: " (Current)";
+            color: #fbbf24;
+            font-size: 0.8em;
+        }
+        .sizes {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .sizes p {
+            font-size: 0.8em;
+            color: #999;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Video Annotator Icon Options</h1>
+        
+        <div class="grid">
+            <div class="option current">
+                <img src="public/video-annotator-icon.svg" class="icon-large" alt="Current Icon">
+                <h2>Current Icon</h2>
+                <p>Video camera with recording indicator and lens detail</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/video-annotator-icon.svg" class="icon-small" alt="Small">
+                    <img src="public/video-annotator-icon.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+
+            <div class="option">
+                <img src="public/icon-option-1.svg" class="icon-large" alt="Option 1">
+                <h2>Option 1</h2>
+                <p>Simple camera with play button overlay - clean and modern</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/icon-option-1.svg" class="icon-small" alt="Small">
+                    <img src="public/icon-option-1.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+
+            <div class="option">
+                <img src="public/icon-option-2.svg" class="icon-large" alt="Option 2">
+                <h2>Option 2</h2>
+                <p>Video frame with annotation pen - emphasizes the annotation feature</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/icon-option-2.svg" class="icon-small" alt="Small">
+                    <img src="public/icon-option-2.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+
+            <div class="option">
+                <img src="public/icon-option-3.svg" class="icon-large" alt="Option 3">
+                <h2>Option 3</h2>
+                <p>Film strip with comment bubble - classic video + collaboration</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/icon-option-3.svg" class="icon-small" alt="Small">
+                    <img src="public/icon-option-3.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+
+            <div class="option">
+                <img src="public/icon-option-4.svg" class="icon-large" alt="Option 4">
+                <h2>Option 4</h2>
+                <p>Video screen with colorful annotation markers - playful and clear</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/icon-option-4.svg" class="icon-small" alt="Small">
+                    <img src="public/icon-option-4.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+
+            <div class="option">
+                <img src="public/icon-option-5.svg" class="icon-large" alt="Option 5">
+                <h2>Option 5</h2>
+                <p>Bold play button in frame - simple, recognizable, professional</p>
+                <div class="sizes">
+                    <p>Preview sizes:</p>
+                    <img src="public/icon-option-5.svg" class="icon-small" alt="Small">
+                    <img src="public/icon-option-5.svg" style="width:48px;height:48px;" alt="Medium">
+                </div>
+            </div>
+        </div>
+
+        <div style="background: white; border-radius: 16px; padding: 30px; text-align: center;">
+            <h2 style="color: #8b5cf6; margin-top: 0;">How to Choose</h2>
+            <p style="color: #666; max-width: 600px; margin: 0 auto;">
+                Open this file in your browser to see all options. Each icon is shown at different sizes 
+                to help you see how it will look as a favicon (small) and in the header (larger).
+                Let me know which option number you prefer (Current, 1, 2, 3, 4, or 5)!
+            </p>
+        </div>
+    </div>
+</body>
+</html>

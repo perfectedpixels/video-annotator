@@ -1,0 +1,100 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.production
+server/.env
+server/.env.railway
+
+# Logs
+*.log
+npm-debug.log*
+server.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# AWS
+*.pem
+*.key
+
+# Temporary files
+*.tmp
+*.temp
+
+# Deployment scripts (contain sensitive info)
+*.sh
+
+# Documentation (keep only README.github.md → renamed to README.md on GitHub)
+AUTH_SETUP.md
+CREDENTIALS.md
+DEPLOYMENT*.md
+DEPLOY_NOW.md
+FIGMA_SETUP.md
+LOCAL_DEVELOPMENT.md
+OPTIMIZATION_SUMMARY.md
+PRE_LAUNCH_CHECKLIST.md
+PRODUCTION*.md
+PROTOZOA*.md
+QUICK_DEPLOY.md
+README_DEPLOYMENT.md
+README_S3_INTEGRATION.md
+S3_SETUP.md
+SCREEN_REFERENCE.md
+SUPERNOVA*.md
+
+# Amazon-internal files
+AMAZON_INTERNAL_DEPLOYMENT_GUIDE.md
+AWS_CREDENTIALS_SETUP.md
+AWS_MIGRATION.md
+BACKEND_CLOUDFRONTSIGNER_OPTIONS.md
+CLOUDFRONTSIGNER_IMPLEMENTATION_PLAN.md
+CLOUDFRONT_IMPLEMENTATION_GUIDE.md
+CLOUDFRONT_MANUAL_SETUP.md
+CLOUDFRONT_SOLUTION.md
+COMPLETE_SSL_SETUP_CHECKLIST.md
+CREATE_CLOUDFRONT_KEYPAIR.md
+EC2_TICKET_RESPONSE.txt
+IMMEDIATE_ACTION_PLAN.md
+MIDWAY_IMPLEMENTATION_PLAN.md
+NEW_PROJECT_DEPLOYMENT_TEMPLATE.md
+NEXT_STEPS.md
+NEXT_STEPS_CHECKLIST.md
+NGINX_SSL_COMPLIANCE_VERIFICATION.md
+NGINX_SSL_SETUP_GUIDE.md
+RATE_LIMITING_BRUTE_FORCE_PROTECTION.md
+RESTART_SERVER_GUIDE.md
+TICKET_RESPONSE.txt
+TICKET_FORM_RESPONSE.txt
+VIDEO_ANNOTATOR_DEPLOYMENT_REFERENCE.md
+WORKSPACE_ACCESS*.md
+S3_PUBLIC_ACCESS_SETUP.md
+CONTRIBUTING.md
+error-handling/
+setup-*.sh
+restrict-*.sh
+add-cors-*.sh
+create-cloudfront-*.sh
+update-server-*.sh
+
+# Amazon-internal server files
+server/workspace-access.json
+server/index.js
+
+# Archives
+*.tar.gz
+*.zip

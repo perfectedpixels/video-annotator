@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Option 5: Bold simple play button with frame -->
+  <defs>
+    <linearGradient id="grad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6d28d9;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <circle cx="50" cy="50" r="48" fill="url(#grad5)"/>
+  
+  <!-- Rounded square frame -->
+  <rect x="20" y="28" width="60" height="44" rx="6" fill="white"/>
+  
+  <!-- Inner frame -->
+  <rect x="26" y="34" width="48" height="32" rx="3" fill="#8b5cf6" opacity="0.15"/>
+  
+  <!-- Large play button -->
+  <path d="M 42 40 L 42 60 L 60 50 Z" fill="white"/>
+  <path d="M 44 44 L 44 56 L 56 50 Z" fill="#8b5cf6"/>
+</svg>

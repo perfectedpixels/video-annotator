@@ -1,0 +1,27 @@
+CloudFront Key Group Configuration
+===================================
+
+Public Key ID: K1G2NST4KBQ67Q
+Key Group ID: 02540224-2d06-4721-8aca-fb1e49983b26
+Key Group Name: video-annotator-key-group
+Distribution ID: E2BQXEPK57V6AW
+
+Private Key File: cloudfront-private-key.pem
+Public Key File: cloudfront-public-key.pem
+
+IMPORTANT: Keep the private key file secure!
+- Don't commit it to git
+- Don't share it
+- Store it in a secure location
+
+Next Steps:
+-----------
+1. Wait for CloudFront distribution to finish deploying (if not already)
+   - Check status: aws cloudfront get-distribution --id E2BQXEPK57V6AW | jq -r '.Distribution.Status'
+   - Wait for: "Deployed"
+
+2. Run: ./update-server-for-cloudfront.sh
+   - It will use the Public Key ID: K1G2NST4KBQ67Q
+   - It will use the private key file: cloudfront-private-key.pem
+
+3. Test the signed URLs work

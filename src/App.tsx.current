@@ -1,0 +1,2221 @@
+import { useState, useRef, useEffect } from 'react'
+import { PlayIcon, TrashIcon, ChatBubbleLeftIcon, ArrowDownTrayIcon, PlusIcon, VideoCameraIcon, ShareIcon, PencilIcon, ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { Button } from './components/ui/button'
+import { Card } from './components/ui/card'
+import { io, type Socket } from 'socket.io-client'
+import { v4 as uuidv4 } from 'uuid'
+import { AnnotationModal } from './components/AnnotationModal'
+import { VideoUploadForm } from './components/VideoUploadForm'
+import { VideoLibrary } from './components/VideoLibrary'
+import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from 'docx'
+import { SOCKET_URL, API_BASE_URL } from './config'
+import { saveAs } from 'file-saver'
+
+interface Comment {
+  id: string
+  username: string
+  text: string
+  createdAt: number
+  x?: number  // Pin x position
+  y?: number  // Pin y position
+  color?: string  // Pin color
+  resolved?: boolean  // Comment resolution status
+}
+
+interface Annotation {
+  id: string
+  timestamp: number
+  text: string
+  screenshot: string
+  username: string
+  createdAt: number
+  comments?: Comment[]
+  editedScreenshot?: string
+  notes?: string
+}
+
+interface Video {
+  id: string
+  filename: string
+  url: string
+  title: string
+  description: string
+  notes?: string
+  tags: string[]
+  username: string
+  uploadedAt: number
+  size: number
+  status?: 'draft' | 'ready-for-review' | 'approved' | 'needs-changes'  // Video status
+  transcriptionStatus?: 'pending' | 'processing' | 'completed' | 'failed'
+  transcriptionJobId?: string
+  transcript?: Array<{
+    start: number
+    end: number
+    text: string
+  }>
+  aiSummary?: string
+  aiSummaryStatus?: 'pending' | 'processing' | 'completed' | 'failed'
+}
+
+type ViewMode = 'library' | 'my-videos' | 'upload' | 'annotate'
+
+function App() {
+  const [videoId, setVideoId] = useState('')
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
+  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  const [currentTime, setCurrentTime] = useState(0)
+  const [username, setUsername] = useState('')
+  const [isUsernameSet, setIsUsernameSet] = useState(false)
+  const [isEditingUsername, setIsEditingUsername] = useState(false)
+  const [expandedAnnotations, setExpandedAnnotations] = useState<Set<string>>(new Set())
+  const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null)
+  const [isCreatingAnnotation, setIsCreatingAnnotation] = useState(false)
+  const [newAnnotationScreenshot, setNewAnnotationScreenshot] = useState<string>('')
+  const [viewMode, setViewMode] = useState<ViewMode>('library')
+  const [showShareDialog, setShowShareDialog] = useState(false)
+  const [shareUrl, setShareUrl] = useState('')
+  const [copyButtonText, setCopyButtonText] = useState('Copy')
+  const [annotationSortMode, setAnnotationSortMode] = useState<'timestamp' | 'latest'>('timestamp')
+  const [tagSearchQuery, setTagSearchQuery] = useState('')
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [activeTab, setActiveTab] = useState<'notes' | 'transcript' | 'summary'>('notes')
+  const [showFullTranscript, setShowFullTranscript] = useState(false)
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false)
+  const [isEditingNotes, setIsEditingNotes] = useState(false)
+  const [editedNotes, setEditedNotes] = useState('')
+  const [isEditingMetadata, setIsEditingMetadata] = useState(false)
+  const [editedTitle, setEditedTitle] = useState('')
+  const [editedDescription, setEditedDescription] = useState('')
+  const [editedTags, setEditedTags] = useState<string[]>([])
+  const [editedTagInput, setEditedTagInput] = useState('')
+  const [showResolvedComments, setShowResolvedComments] = useState(true)
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false)
+  const [isTheaterMode, setIsTheaterMode] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [volume, setVolume] = useState(1)
+  const [isMuted, setIsMuted] = useState(false)
+  const [videoError, setVideoError] = useState(false)
+  const [videoErrorMessage, setVideoErrorMessage] = useState('')
+  const notesTabRef = useRef<HTMLButtonElement>(null)
+  const transcriptTabRef = useRef<HTMLButtonElement>(null)
+  const summaryTabRef = useRef<HTMLButtonElement>(null)
+  const [tabUnderlineStyle, setTabUnderlineStyle] = useState({ width: 0, left: 0 })
+  const shareUrlInputRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const socketRef = useRef<Socket | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const downloadMenuRef = useRef<HTMLDivElement>(null)
+  const videoContainerRef = useRef<HTMLDivElement>(null)
+
+  // Load username from localStorage or fetch from server on mount
+  useEffect(() => {
+    const initializeUser = async () => {
+      // First, try to get user from Amazon headers
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/current-user`, {
+          credentials: 'include'
+        })
+        const data = await response.json()
+        
+        if (data.success && data.username && data.username !== 'guest-user') {
+          // User authenticated via Amazon headers
+          setUsername(data.username)
+          setIsUsernameSet(true)
+          localStorage.setItem('videoAnnotatorUsername', data.username)
+          console.log('Auto-logged in as:', data.username)
+          return
+        }
+      } catch (err) {
+        console.log('Amazon auth not available, using manual login')
+      }
+      
+      // Fallback to localStorage
+      const savedUsername = localStorage.getItem('videoAnnotatorUsername')
+      if (savedUsername && savedUsername !== 'guest-user') {
+        setUsername(savedUsername)
+        setIsUsernameSet(true)
+      }
+    }
+    
+    initializeUser()
+    
+    // Check for video ID in URL parameters
+    const urlParams = new URLSearchParams(window.location.search)
+    const videoIdFromUrl = urlParams.get('video')
+    const annotationIdFromUrl = urlParams.get('annotation')
+    const commentIdFromUrl = urlParams.get('comment')
+    
+    if (videoIdFromUrl) {
+      // Fetch the video and load it
+      fetch(`${API_BASE_URL}/api/videos`)
+        .then(res => res.json())
+        .then(data => {
+          const video = data.videos.find((v: Video) => v.id === videoIdFromUrl)
+          if (video) {
+            handleSelectVideo(video)
+            
+            // If annotation ID is provided, wait for annotations to load then open it
+            if (annotationIdFromUrl) {
+              // Store in sessionStorage to handle after annotations load
+              sessionStorage.setItem('openAnnotationId', annotationIdFromUrl)
+              if (commentIdFromUrl) {
+                sessionStorage.setItem('openCommentId', commentIdFromUrl)
+              }
+            }
+          }
+        })
+        .catch(err => console.error('Failed to load video from URL:', err))
+    }
+  }, [])
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const videoIdFromUrl = urlParams.get('video')
+      
+      if (!videoIdFromUrl && viewMode === 'annotate') {
+        // User navigated back to library
+        handleBackToLibrary()
+      } else if (videoIdFromUrl && (!selectedVideo || selectedVideo.id !== videoIdFromUrl)) {
+        // User navigated to a different video
+        fetch(`${API_BASE_URL}/api/videos`)
+          .then(res => res.json())
+          .then(data => {
+            const video = data.videos.find((v: Video) => v.id === videoIdFromUrl)
+            if (video) {
+              handleSelectVideo(video)
+            }
+          })
+          .catch(err => console.error('Failed to load video from URL:', err))
+      }
+    }
+    
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [viewMode, selectedVideo])
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
+        setShowDownloadMenu(false)
+      }
+    }
+
+    if (showDownloadMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showDownloadMenu])
+
+  // Socket.io connection
+  useEffect(() => {
+    if (videoId && isUsernameSet && viewMode === 'annotate') {
+      socketRef.current = io(SOCKET_URL)
+      
+      socketRef.current.emit('join-video', { videoId, username })
+      
+      socketRef.current.on('annotations-loaded', (loadedAnnotations: Annotation[]) => {
+        setAnnotations(loadedAnnotations)
+        
+        // Check if we need to open a specific annotation from URL
+        const openAnnotationId = sessionStorage.getItem('openAnnotationId')
+        if (openAnnotationId) {
+          const annotation = loadedAnnotations.find(a => a.id === openAnnotationId)
+          if (annotation) {
+            setSelectedAnnotation(annotation)
+            // Don't clear commentId yet - let the modal handle it
+            sessionStorage.removeItem('openAnnotationId')
+          }
+        }
+      })
+      
+      socketRef.current.on('annotation-added', (annotation: Annotation) => {
+        setAnnotations(prev => [...prev, annotation].sort((a, b) => a.timestamp - b.timestamp))
+      })
+      
+      socketRef.current.on('comment-added', ({ annotationId, comment }: { annotationId: string, comment: Comment }) => {
+        setAnnotations(prev => prev.map(a => 
+          a.id === annotationId 
+            ? { ...a, comments: [...(a.comments || []), comment] }
+            : a
+        ))
+      })
+      
+      socketRef.current.on('annotation-deleted', (annotationId: string) => {
+        setAnnotations(prev => prev.filter(a => a.id !== annotationId))
+      })
+
+      socketRef.current.on('annotation-updated', (updatedAnnotation: Annotation) => {
+        setAnnotations(prev => prev.map(a => 
+          a.id === updatedAnnotation.id ? updatedAnnotation : a
+        ))
+      })
+      
+      socketRef.current.on('video-updated', (updatedVideo: Video) => {
+        // Update the selected video with new transcription/summary data
+        if (selectedVideo && selectedVideo.id === updatedVideo.id) {
+          setSelectedVideo(updatedVideo)
+        }
+      })
+      
+      return () => {
+        socketRef.current?.disconnect()
+      }
+    }
+  }, [videoId, isUsernameSet, username, viewMode, selectedVideo])
+
+  // Function to update Open Graph meta tags for link previews
+  const updateMetaTags = (video: Video | null, isComment: boolean = false) => {
+    const baseTitle = 'Video Annotator - Async Design Feedback'
+    const baseDescription = 'Share design walkthroughs and get asynchronous feedback with pinned comments, transcriptions, and AI summaries.'
+    
+    let title = baseTitle
+    let description = baseDescription
+    
+    if (video) {
+      if (isComment) {
+        title = `Video Annotator - ${video.title} Comment`
+        description = `View comment on "${video.title}"`
+      } else {
+        title = `Video Annotator - ${video.title}`
+        description = video.description || `Watch and annotate "${video.title}"`
+      }
+    }
+    
+    // Update document title
+    document.title = title
+    
+    // Update or create meta tags
+    const updateMetaTag = (property: string, content: string) => {
+      let meta = document.querySelector(`meta[property="${property}"]`) as HTMLMetaElement
+      if (!meta) {
+        meta = document.createElement('meta')
+        meta.setAttribute('property', property)
+        document.head.appendChild(meta)
+      }
+      meta.content = content
+    }
+    
+    const updateNameMetaTag = (name: string, content: string) => {
+      let meta = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement
+      if (!meta) {
+        meta = document.createElement('meta')
+        meta.setAttribute('name', name)
+        document.head.appendChild(meta)
+      }
+      meta.content = content
+    }
+    
+    updateMetaTag('og:title', title)
+    updateMetaTag('og:description', description)
+    updateNameMetaTag('description', description)
+    updateNameMetaTag('twitter:title', title)
+    updateNameMetaTag('twitter:description', description)
+  }
+
+  const handleUploadComplete = (video: Video) => {
+    setSelectedVideo(video)
+    setVideoId(video.id)
+    setAnnotations([])
+    setViewMode('annotate')
+    updateMetaTags(video)
+    
+    // Update URL in browser
+    const newUrl = `${window.location.origin}?video=${video.id}`
+    window.history.pushState({ videoId: video.id }, '', newUrl)
+  }
+
+  const handleSelectVideo = (video: Video) => {
+    setSelectedVideo(video)
+    setVideoId(video.id)
+    setAnnotations([])
+    setVideoDuration(0) // Reset duration when selecting new video
+    setViewMode('annotate')
+    setTagSearchQuery('') // Clear tag search when selecting a video
+    setIsEditingNotes(false) // Reset notes editing state
+    setEditedNotes('') // Clear edited notes
+    updateMetaTags(video)
+    
+    // Update URL in browser
+    const newUrl = `${window.location.origin}?video=${video.id}`
+    window.history.pushState({ videoId: video.id }, '', newUrl)
+    
+    // Update last visit time for this video BEFORE entering
+    const lastVisits = JSON.parse(localStorage.getItem('videoLastVisits') || '{}')
+    const previousVisit = lastVisits[video.id]
+    
+    // Store the previous visit time for "new" comment detection
+    sessionStorage.setItem(`lastVisit_${video.id}`, previousVisit?.toString() || '0')
+    
+    // Update to current time
+    lastVisits[video.id] = Date.now()
+    localStorage.setItem('videoLastVisits', JSON.stringify(lastVisits))
+  }
+
+  const isCommentNew = (commentCreatedAt: number): boolean => {
+    if (!selectedVideo) return false
+    const lastVisit = parseInt(sessionStorage.getItem(`lastVisit_${selectedVideo.id}`) || '0')
+    return commentCreatedAt > lastVisit
+  }
+
+  const handleTabChange = (newTab: 'notes' | 'transcript' | 'summary') => {
+    if (newTab === activeTab) return
+    
+    setActiveTab(newTab)
+    
+    // Update underline position
+    updateTabUnderline(newTab)
+  }
+
+  const updateTabUnderline = (tab: 'notes' | 'transcript' | 'summary') => {
+    const refs = {
+      notes: notesTabRef,
+      transcript: transcriptTabRef,
+      summary: summaryTabRef
+    }
+    
+    const activeRef = refs[tab].current
+    if (activeRef) {
+      setTabUnderlineStyle({
+        width: activeRef.offsetWidth,
+        left: activeRef.offsetLeft
+      })
+    }
+  }
+
+  // Update underline on mount and when active tab changes
+  useEffect(() => {
+    if (selectedVideo && viewMode === 'annotate') {
+      updateTabUnderline(activeTab)
+    }
+  }, [selectedVideo, viewMode, activeTab])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      const video = videoRef.current
+      if (!video) return
+
+      switch(e.key.toLowerCase()) {
+        case ' ':
+          e.preventDefault()
+          video.paused ? video.play() : video.pause()
+          break
+        case 'arrowleft':
+          e.preventDefault()
+          video.currentTime = Math.max(0, video.currentTime - 5)
+          break
+        case 'arrowright':
+          e.preventDefault()
+          video.currentTime = Math.min(video.duration, video.currentTime + 5)
+          break
+        case 'arrowup':
+          e.preventDefault()
+          video.volume = Math.min(1, video.volume + 0.1)
+          break
+        case 'arrowdown':
+          e.preventDefault()
+          video.volume = Math.max(0, video.volume - 0.1)
+          break
+        case 'j':
+          video.currentTime = Math.max(0, video.currentTime - 10)
+          break
+        case 'k':
+          video.paused ? video.play() : video.pause()
+          break
+        case 'l':
+          video.currentTime = Math.min(video.duration, video.currentTime + 10)
+          break
+        case 'c':
+          if (viewMode === 'annotate') {
+            handleStartAnnotation()
+          }
+          break
+        case 'f':
+          // Toggle theater mode instead of fullscreen
+          setIsTheaterMode(prev => !prev)
+          break
+        case 'm':
+          video.muted = !video.muted
+          break
+        case '?':
+          setShowKeyboardHelp(!showKeyboardHelp)
+          break
+      }
+    }
+
+    if (viewMode === 'annotate') {
+      window.addEventListener('keydown', handleKeyPress)
+      return () => {
+        window.removeEventListener('keydown', handleKeyPress)
+      }
+    }
+  }, [viewMode, showKeyboardHelp])
+
+  const handleStatusChange = async (newStatus: Video['status']) => {
+    if (!selectedVideo) return
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/videos/${selectedVideo.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: newStatus
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setSelectedVideo({ ...selectedVideo, status: newStatus })
+      }
+    } catch (error) {
+      console.error('Failed to update status:', error)
+      alert('Failed to update status. Please try again.')
+    }
+  }
+
+  const handleToggleCommentResolved = async (annotationId: string, commentId: string) => {
+    const annotation = annotations.find(a => a.id === annotationId)
+    if (!annotation) return
+
+    const comment = annotation.comments?.find(c => c.id === commentId)
+    if (!comment) return
+
+    const updatedComments = annotation.comments?.map(c =>
+      c.id === commentId ? { ...c, resolved: !c.resolved } : c
+    )
+
+    const updatedAnnotation = {
+      ...annotation,
+      comments: updatedComments
+    }
+
+    socketRef.current?.emit('update-annotation', { videoId, annotation: updatedAnnotation })
+  }
+
+  const handleTogglePlay = () => {
+    if (videoRef.current) {
+      if (videoRef.current.paused) {
+        videoRef.current.play()
+        setIsPlaying(true)
+      } else {
+        videoRef.current.pause()
+        setIsPlaying(false)
+      }
+    }
+  }
+
+  const handleVolumeChange = (newVolume: number) => {
+    if (videoRef.current) {
+      videoRef.current.volume = newVolume
+      setVolume(newVolume)
+      setIsMuted(newVolume === 0)
+    }
+  }
+
+  const handleToggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted
+      setIsMuted(!videoRef.current.muted)
+    }
+  }
+
+  const handleSeekToTime = (time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time
+    }
+  }
+
+  const handleVideoError = () => {
+    setVideoError(true)
+    const video = videoRef.current
+    if (video?.error) {
+      const errorCode = video.error.code
+      let message = 'Unknown error'
+      
+      switch (errorCode) {
+        case 1: // MEDIA_ERR_ABORTED
+          message = 'Video loading was aborted'
+          break
+        case 2: // MEDIA_ERR_NETWORK
+          message = 'Network error while loading video'
+          break
+        case 3: // MEDIA_ERR_DECODE
+          message = 'Video decoding failed'
+          break
+        case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+          message = 'Video format not supported or source unavailable'
+          break
+      }
+      
+      setVideoErrorMessage(message)
+      console.error('Video error:', message, video.error)
+    }
+  }
+
+  const handleVideoCanPlay = () => {
+    setVideoError(false)
+    setVideoErrorMessage('')
+  }
+
+  const handleBackToLibrary = () => {
+    setViewMode('library')
+    setSelectedVideo(null)
+    setVideoId('')
+    setAnnotations([])
+    setIsEditingNotes(false)
+    updateMetaTags(null) // Reset meta tags to default
+    setEditedNotes('')
+    socketRef.current?.disconnect()
+    
+    // Clear URL parameters
+    window.history.pushState({}, '', window.location.origin)
+  }
+
+  const handleStartEditingNotes = () => {
+    setEditedNotes(selectedVideo?.notes || '')
+    setIsEditingNotes(true)
+  }
+
+  const handleSaveNotes = async () => {
+    if (!selectedVideo) return
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/videos/${selectedVideo.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          notes: editedNotes
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setSelectedVideo({ ...selectedVideo, notes: editedNotes })
+        setIsEditingNotes(false)
+      }
+    } catch (error) {
+      console.error('Failed to save notes:', error)
+      alert('Failed to save notes. Please try again.')
+    }
+  }
+
+  const handleCancelEditingNotes = () => {
+    setIsEditingNotes(false)
+    setEditedNotes('')
+  }
+
+  const handleStartEditingMetadata = () => {
+    if (!selectedVideo) return
+    setEditedTitle(selectedVideo.title)
+    setEditedDescription(selectedVideo.description || '')
+    setEditedTags([...selectedVideo.tags])
+    setEditedTagInput('')
+    setIsEditingMetadata(true)
+  }
+
+  const handleAddEditedTag = (tag: string) => {
+    const newTags = tag.split(',')
+      .map(t => t.trim())
+      .filter(t => t && !editedTags.includes(t))
+    
+    if (newTags.length > 0) {
+      setEditedTags([...editedTags, ...newTags])
+      setEditedTagInput('')
+    }
+  }
+
+  const handleRemoveEditedTag = (tagToRemove: string) => {
+    setEditedTags(editedTags.filter(t => t !== tagToRemove))
+  }
+
+  const handleSaveMetadata = async () => {
+    if (!selectedVideo || !editedTitle.trim()) {
+      alert('Title is required')
+      return
+    }
+
+    // Process tags from input field (split by comma)
+    const finalTags = editedTagInput.trim() 
+      ? [...editedTags, ...editedTagInput.split(',').map(t => t.trim()).filter(t => t && !editedTags.includes(t))]
+      : editedTags
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/videos/${selectedVideo.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: editedTitle.trim(),
+          description: editedDescription.trim(),
+          tags: finalTags
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setSelectedVideo({ 
+          ...selectedVideo, 
+          title: editedTitle.trim(),
+          description: editedDescription.trim(),
+          tags: finalTags
+        })
+        setIsEditingMetadata(false)
+        updateMetaTags({ ...selectedVideo, title: editedTitle.trim(), description: editedDescription.trim() })
+      }
+    } catch (error) {
+      console.error('Failed to save metadata:', error)
+      alert('Failed to save changes. Please try again.')
+    }
+  }
+
+  const handleCancelEditingMetadata = () => {
+    setIsEditingMetadata(false)
+    setEditedTitle('')
+    setEditedDescription('')
+    setEditedTags([])
+    setEditedTagInput('')
+  }
+
+  const handleTagClick = (tag: string) => {
+    setTagSearchQuery(tag)
+    setViewMode('library')
+  }
+
+  const handleShareAnnotation = (annotationId: string) => {
+    if (!selectedVideo) return
+    const url = `${window.location.origin}?video=${selectedVideo.id}&annotation=${annotationId}`
+    setShareUrl(url)
+    setShowShareDialog(true)
+    setCopyButtonText('Copy')
+    updateMetaTags(selectedVideo, true) // Update meta tags for comment link
+  }
+
+  const handleShareVideo = () => {
+    if (!selectedVideo) return
+    
+    const url = `${window.location.origin}?video=${selectedVideo.id}`
+    setShareUrl(url)
+    setShowShareDialog(true)
+    setCopyButtonText('Copy')
+    updateMetaTags(selectedVideo, false) // Update meta tags for video link
+  }
+  
+  const handleCopyShareUrl = () => {
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        setCopyButtonText('Copied!')
+        setTimeout(() => {
+          setShowShareDialog(false)
+          setCopyButtonText('Copy')
+        }, 1000)
+      }).catch(() => {
+        // Fallback to selection method
+        fallbackCopy()
+      })
+    } else {
+      // Fallback for browsers without clipboard API
+      fallbackCopy()
+    }
+  }
+  
+  const fallbackCopy = () => {
+    if (shareUrlInputRef.current) {
+      shareUrlInputRef.current.select()
+      shareUrlInputRef.current.setSelectionRange(0, 99999) // For mobile
+      try {
+        document.execCommand('copy')
+        setCopyButtonText('Copied!')
+        setTimeout(() => {
+          setShowShareDialog(false)
+          setCopyButtonText('Copy')
+        }, 1000)
+      } catch (err) {
+        alert('Please manually copy the URL')
+      }
+    }
+  }
+
+  const captureScreenshot = async (): Promise<string> => {
+    const canvas = canvasRef.current
+    if (!canvas || !videoRef.current) return ''
+    
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    
+    const video = videoRef.current
+    
+    // Optimize resolution to match dialog width (max-w-7xl = 1280px)
+    // This reduces file size and matches the display resolution
+    const maxWidth = 1280
+    const aspectRatio = video.videoWidth / video.videoHeight
+    
+    let targetWidth = video.videoWidth
+    let targetHeight = video.videoHeight
+    
+    if (targetWidth > maxWidth) {
+      targetWidth = maxWidth
+      targetHeight = Math.round(maxWidth / aspectRatio)
+    }
+    
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      
+      // Add timestamp overlay (scaled to canvas size)
+      const overlayHeight = Math.max(60, canvas.height * 0.08)
+      const fontSize = Math.max(32, canvas.height * 0.04)
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+      ctx.fillRect(0, canvas.height - overlayHeight, canvas.width, overlayHeight)
+      ctx.fillStyle = '#fff'
+      ctx.font = `bold ${fontSize}px Arial`
+      ctx.textAlign = 'center'
+      ctx.fillText(formatTime(currentTime), canvas.width / 2, canvas.height - overlayHeight / 3)
+      
+      return canvas.toDataURL('image/jpeg', 0.95)
+    } catch (error) {
+      console.error('Screenshot failed:', error)
+      return ''
+    }
+  }
+
+  const handleStartAnnotation = async () => {
+    // Pause video
+    if (videoRef.current) {
+      videoRef.current.pause()
+    }
+    
+    // Capture screenshot
+    const screenshot = await captureScreenshot()
+    setNewAnnotationScreenshot(screenshot)
+    setIsCreatingAnnotation(true)
+  }
+
+  const handleSaveNewAnnotation = (editedScreenshot: string, text: string, comments?: Comment[]) => {
+    const newAnnotation: Annotation = {
+      id: uuidv4(),
+      timestamp: currentTime,
+      text,
+      screenshot: newAnnotationScreenshot,
+      editedScreenshot,
+      username,
+      createdAt: Date.now(),
+      comments: comments || []
+    }
+
+    if (!socketRef.current?.connected) {
+      alert('Connection lost. Please refresh the page.')
+      return
+    }
+    
+    const screenshotSize = (newAnnotationScreenshot.length + editedScreenshot.length) / 1024 / 1024
+    console.log(`Saving annotation with screenshot size: ${screenshotSize.toFixed(2)}MB`)
+    
+    if (screenshotSize > 8) {
+      alert('Screenshot is too large (>8MB). Try reducing video quality or zoom level.')
+      return
+    }
+    
+    socketRef.current?.emit('add-annotation', { videoId, annotation: newAnnotation })
+    setIsCreatingAnnotation(false)
+    setNewAnnotationScreenshot('')
+  }
+
+  const handleDeleteAnnotation = (id: string) => {
+    socketRef.current?.emit('delete-annotation', { videoId, annotationId: id })
+  }
+
+  const handleSeekTo = (timestamp: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = timestamp
+      videoRef.current.play()
+    }
+  }
+
+  const toggleAnnotationExpanded = (id: string) => {
+    setExpandedAnnotations(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }
+
+  const getSortedAnnotations = () => {
+    if (annotationSortMode === 'timestamp') {
+      // Sort by video timestamp (chronological order in video)
+      return [...annotations].sort((a, b) => a.timestamp - b.timestamp)
+    } else {
+      // Sort by creation time (latest first)
+      return [...annotations].sort((a, b) => b.createdAt - a.createdAt)
+    }
+  }
+
+  const handleAnnotationClick = (annotation: Annotation) => {
+    setSelectedAnnotation(annotation)
+  }
+
+  const handleSaveAnnotationEdit = (editedScreenshot: string, notes: string, comments?: Comment[]) => {
+    if (!selectedAnnotation) return
+
+    const updatedAnnotation = {
+      ...selectedAnnotation,
+      editedScreenshot,
+      notes,
+      comments: comments || selectedAnnotation.comments || []
+    }
+
+    socketRef.current?.emit('update-annotation', { videoId, annotation: updatedAnnotation })
+    setSelectedAnnotation(null)
+  }
+
+  const handleExportToWord = async () => {
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            text: 'Video Annotations Report',
+            heading: HeadingLevel.HEADING_1,
+          }),
+          new Paragraph({
+            text: `Video: ${selectedVideo?.title || 'Untitled'}`,
+            spacing: { after: 200 }
+          }),
+          new Paragraph({
+            text: `Video ID: ${videoId}`,
+            spacing: { after: 200 }
+          }),
+          new Paragraph({
+            text: `Total Annotations: ${annotations.length}`,
+            spacing: { after: 400 }
+          }),
+          // Add AI Summary if available
+          ...(selectedVideo?.aiSummary && selectedVideo?.aiSummaryStatus === 'completed' ? [
+            new Paragraph({
+              text: 'AI Summary',
+              heading: HeadingLevel.HEADING_2,
+              spacing: { before: 400, after: 200 }
+            }),
+            new Paragraph({
+              text: selectedVideo.aiSummary.replace(/<br>/g, '\n'),
+              spacing: { after: 400 }
+            })
+          ] : []),
+          ...await Promise.all(annotations.map(async (annotation, index) => {
+            const elements: any[] = [
+              new Paragraph({
+                text: `Annotation ${index + 1}`,
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 400, after: 200 }
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({ text: 'Timestamp: ', bold: true }),
+                  new TextRun(formatTime(annotation.timestamp))
+                ]
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({ text: 'By: ', bold: true }),
+                  new TextRun(annotation.username)
+                ]
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({ text: 'Annotation: ', bold: true }),
+                  new TextRun(annotation.text)
+                ],
+                spacing: { after: 200 }
+              })
+            ]
+
+            // Add screenshot
+            try {
+              const imageToUse = annotation.editedScreenshot || annotation.screenshot
+              const base64Data = imageToUse.split(',')[1]
+              const imageBuffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0))
+              
+              elements.push(
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: imageBuffer,
+                      transformation: {
+                        width: 400,
+                        height: 300
+                      },
+                      type: 'png'
+                    })
+                  ],
+                  spacing: { after: 200 }
+                })
+              )
+
+              if (annotation.editedScreenshot) {
+                elements.push(
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: '(Edited version shown above)',
+                        italics: true
+                      })
+                    ],
+                    spacing: { after: 200 }
+                  })
+                )
+              }
+            } catch (err) {
+              console.error('Failed to add image:', err)
+            }
+
+            if (annotation.notes) {
+              elements.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({ text: 'Notes: ', bold: true }),
+                    new TextRun(annotation.notes)
+                  ],
+                  spacing: { after: 200 }
+                })
+              )
+            }
+
+            if (annotation.comments && annotation.comments.length > 0) {
+              elements.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: 'Comments:',
+                      bold: true
+                    })
+                  ],
+                  spacing: { after: 100 }
+                })
+              )
+              
+              annotation.comments.forEach(comment => {
+                elements.push(
+                  new Paragraph({
+                    text: `${comment.username}: ${comment.text}`,
+                    bullet: { level: 0 }
+                  })
+                )
+              })
+            }
+
+            return elements
+          })).then(results => results.flat())
+        ]
+      }]
+    })
+
+    const blob = await Packer.toBlob(doc)
+    saveAs(blob, `video-annotations-${selectedVideo?.title || videoId}.docx`)
+    setShowDownloadMenu(false)
+  }
+
+  const handleDownloadVideo = async () => {
+    if (!selectedVideo) return
+    
+    try {
+      // Fetch the video as a blob
+      const response = await fetch(selectedVideo.url)
+      const blob = await response.blob()
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${selectedVideo.title}.${selectedVideo.filename.split('.').pop()}`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error downloading video:', error)
+      // Fallback to direct link
+      const link = document.createElement('a')
+      link.href = selectedVideo.url
+      link.download = `${selectedVideo.title}.${selectedVideo.filename.split('.').pop()}`
+      link.setAttribute('target', '_blank')
+      link.click()
+    }
+    
+    setShowDownloadMenu(false)
+  }
+
+  const handleDownloadTranscript = () => {
+    if (!selectedVideo?.transcript) return
+    
+    // Create SRT format transcript
+    let srtContent = ''
+    selectedVideo.transcript.forEach((segment, index) => {
+      const startTime = formatSRTTime(segment.start)
+      const endTime = formatSRTTime(segment.end)
+      srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text}\n\n`
+    })
+    
+    const blob = new Blob([srtContent], { type: 'text/plain' })
+    saveAs(blob, `${selectedVideo.title}-transcript.srt`)
+    setShowDownloadMenu(false)
+  }
+
+  const handleDownloadAll = async () => {
+    // Download video
+    handleDownloadVideo()
+    
+    // Download transcript if available
+    if (selectedVideo?.transcript) {
+      setTimeout(() => handleDownloadTranscript(), 500)
+    }
+    
+    // Download comments
+    if (annotations.length > 0) {
+      setTimeout(() => handleExportToWord(), 1000)
+    }
+    
+    setShowDownloadMenu(false)
+  }
+
+  const formatSRTTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = Math.floor(seconds % 60)
+    const ms = Math.floor((seconds % 1) * 1000)
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`
+  }
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const handleSetUsername = (newUsername: string) => {
+    if (newUsername.trim()) {
+      setUsername(newUsername)
+      setIsUsernameSet(true)
+      setIsEditingUsername(false)
+      localStorage.setItem('videoAnnotatorUsername', newUsername)
+    }
+  }
+
+  const handleChangeUsername = () => {
+    setIsEditingUsername(true)
+  }
+
+  // Username setup screen
+  if (!isUsernameSet || isEditingUsername) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="p-8 max-w-md w-full animate-fade-in-up">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">
+            {isEditingUsername ? 'Change Username' : 'Welcome to Video Annotator'}
+          </h1>
+          <p className="text-gray-600 mb-6">
+            {isEditingUsername ? 'Enter your new username' : 'Enter your username to start collaborating'}
+          </p>
+          <div className="space-y-4">
+            <input
+              type="text"
+              placeholder="Your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSetUsername(username)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              {isEditingUsername && (
+                <Button 
+                  onClick={() => setIsEditingUsername(false)}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button 
+                onClick={() => handleSetUsername(username)}
+                className="flex-1"
+                disabled={!username.trim()}
+              >
+                {isEditingUsername ? 'Save' : 'Continue'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
+  // No username setup screen - users are auto-logged in
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      
+      {/* Share Dialog */}
+      {showShareDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fade-in">
+          <Card className="p-6 max-w-lg w-full animate-fade-in-up">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Share Video</h2>
+            <p className="text-gray-600 mb-4">Copy this link to share the video:</p>
+            <input
+              ref={shareUrlInputRef}
+              type="text"
+              value={shareUrl}
+              readOnly
+              className="w-full bg-gray-50 p-3 rounded-lg mb-4 font-mono text-sm border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={(e) => e.currentTarget.select()}
+            />
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => setShowShareDialog(false)}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleCopyShareUrl}
+                className="flex-1"
+              >
+                {copyButtonText}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+      
+      {(selectedAnnotation || isCreatingAnnotation) && (
+        <AnnotationModal
+          annotation={selectedAnnotation || {
+            id: '',
+            timestamp: currentTime,
+            text: '',
+            screenshot: newAnnotationScreenshot,
+            username,
+            createdAt: Date.now()
+          }}
+          transcript=""
+          currentUsername={username}
+          videoId={videoId}
+          openCommentId={sessionStorage.getItem('openCommentId') || undefined}
+          onClose={() => {
+            setSelectedAnnotation(null)
+            setIsCreatingAnnotation(false)
+            setNewAnnotationScreenshot('')
+            sessionStorage.removeItem('openCommentId')
+          }}
+          onSave={selectedAnnotation ? handleSaveAnnotationEdit : handleSaveNewAnnotation}
+        />
+      )}
+      
+      <div className="max-w-7xl mx-auto pb-16">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-5 mb-6 border border-slate-700 shadow-2xl">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="absolute inset-0 bg-purple-500 blur-xl opacity-50 rounded-full"></div>
+                <img src="/icon-option-4.svg" alt="Video Annotator" className="w-12 h-12 relative z-10 drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
+              </div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-white via-purple-200 to-white bg-clip-text text-transparent">
+                Video Annotator
+              </h1>
+            </div>
+            <div className="flex items-center gap-4">
+            {viewMode === 'annotate' && selectedVideo && (
+              <div className="relative" ref={downloadMenuRef}>
+                <Button 
+                  onClick={() => setShowDownloadMenu(!showDownloadMenu)} 
+                  className="bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
+                  size="sm"
+                >
+                  <ArrowDownTrayIcon className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+                
+                {showDownloadMenu && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50 animate-fade-in">
+                    <button
+                      onClick={handleDownloadVideo}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                    >
+                      <ArrowDownTrayIcon className="w-4 h-4" />
+                      Download video
+                    </button>
+                    
+                    {selectedVideo.transcript && selectedVideo.transcriptionStatus === 'completed' && (
+                      <button
+                        onClick={handleDownloadTranscript}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                      >
+                        <ArrowDownTrayIcon className="w-4 h-4" />
+                        Download transcript
+                      </button>
+                    )}
+                    
+                    {annotations.length > 0 && (
+                      <button
+                        onClick={handleExportToWord}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                      >
+                        <ArrowDownTrayIcon className="w-4 h-4" />
+                        Download comments as .docx
+                      </button>
+                    )}
+                    
+                    <div className="border-t border-gray-200 my-2"></div>
+                    
+                    <button
+                      onClick={handleDownloadAll}
+                      className="w-full px-4 py-2 text-left text-sm font-semibold text-purple-600 hover:bg-purple-50 flex items-center gap-2"
+                    >
+                      <ArrowDownTrayIcon className="w-4 h-4" />
+                      Download all
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleChangeUsername}
+                className="text-sm text-slate-300 hover:text-white transition-colors px-3 py-1.5 rounded-lg hover:bg-slate-700/50"
+                title="Change username"
+              >
+                👤 {username}
+              </button>
+            </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Keyboard Shortcuts Help Modal */}
+        {showKeyboardHelp && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setShowKeyboardHelp(false)}>
+            <Card className="p-6 max-w-2xl w-full animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">⌨️ Keyboard Shortcuts</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">Playback</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-gray-600">Space</span><span>Play / Pause</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">K</span><span>Play / Pause</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">← →</span><span>Skip 5 seconds</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">J / L</span><span>Skip 10 seconds</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">↑ ↓</span><span>Volume</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">M</span><span>Mute / Unmute</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">F</span><span>Theater Mode</span></div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">Actions</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-gray-600">C</span><span>Add Comment</span></div>
+                    <div className="flex justify-between"><span className="text-gray-600">?</span><span>Show this help</span></div>
+                  </div>
+                </div>
+              </div>
+              <Button onClick={() => setShowKeyboardHelp(false)} className="mt-6 w-full">
+                Got it!
+              </Button>
+            </Card>
+          </div>
+        )}
+
+        {/* Navigation */}
+        {viewMode !== 'annotate' && (
+          <div className="flex gap-3 mb-6 bg-slate-900 rounded-xl p-2 border border-slate-700 shadow-lg">
+            <Button
+              onClick={() => setViewMode('upload')}
+              className={`flex-1 ${viewMode === 'upload' ? 'bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white shadow-lg shadow-purple-500/30' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'}`}
+            >
+              <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
+              Add Video
+            </Button>
+            <Button
+              onClick={() => setViewMode('library')}
+              className={`flex-1 ${viewMode === 'library' ? 'bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white shadow-lg shadow-purple-500/30' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'}`}
+            >
+              <VideoCameraIcon className="w-4 h-4 mr-2" />
+              All Videos
+            </Button>
+            <Button
+              onClick={() => setViewMode('my-videos')}
+              className={`flex-1 ${viewMode === 'my-videos' ? 'bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white shadow-lg shadow-purple-500/30' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'}`}
+            >
+              <VideoCameraIcon className="w-4 h-4 mr-2" />
+              My Videos
+            </Button>
+          </div>
+        )}
+
+        {/* Content based on view mode */}
+        {viewMode === 'library' && (
+          <VideoLibrary
+            username={username}
+            filterByUser={false}
+            onSelectVideo={handleSelectVideo}
+            initialSearchQuery={tagSearchQuery}
+            onTagClick={handleTagClick}
+          />
+        )}
+
+        {viewMode === 'my-videos' && (
+          <VideoLibrary
+            username={username}
+            filterByUser={true}
+            onSelectVideo={handleSelectVideo}
+            initialSearchQuery={tagSearchQuery}
+            onTagClick={handleTagClick}
+          />
+        )}
+
+        {viewMode === 'upload' && (
+          <VideoUploadForm
+            username={username}
+            onUploadComplete={handleUploadComplete}
+            onCancel={() => setViewMode('library')}
+          />
+        )}
+
+        {viewMode === 'annotate' && selectedVideo && (
+          <div>
+            {/* Back button */}
+            <div className="mb-4">
+              <Button
+                variant="outline"
+                onClick={handleBackToLibrary}
+              >
+                ← Back to Library
+              </Button>
+            </div>
+
+            {/* Video title and metadata */}
+            {isEditingMetadata ? (
+              <Card className="p-4 mb-4 bg-purple-50 border-purple-200">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Edit Video Details</h3>
+                
+                {/* Title */}
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Title *</label>
+                  <input
+                    type="text"
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Enter video title"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                  <textarea
+                    value={editedDescription}
+                    onChange={(e) => setEditedDescription(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
+                    placeholder="Add a description (optional)"
+                    rows={2}
+                  />
+                </div>
+
+                {/* Tags */}
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Tags</label>
+                  <input
+                    type="text"
+                    value={editedTagInput}
+                    onChange={(e) => setEditedTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAddEditedTag(editedTagInput)
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Add tags, separated by commas"
+                  />
+                  
+                  {/* Selected tags */}
+                  {editedTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {editedTags.map(tag => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs"
+                        >
+                          {tag}
+                          <button
+                            onClick={() => handleRemoveEditedTag(tag)}
+                            className="hover:text-blue-900"
+                          >
+                            <XMarkIcon className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSaveMetadata}
+                    size="sm"
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    Save Changes
+                  </Button>
+                  <Button
+                    onClick={handleCancelEditingMetadata}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </Card>
+            ) : (
+              <>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-bold">{selectedVideo.title}</h2>
+                    {selectedVideo.username === username && (
+                      <button
+                        onClick={handleStartEditingMetadata}
+                        className="text-gray-400 hover:text-purple-600 transition-colors"
+                        title="Edit video details"
+                      >
+                        <PencilIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Status and Share */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Status:</span>
+                      <select
+                        value={selectedVideo.status || 'draft'}
+                        onChange={(e) => handleStatusChange(e.target.value as Video['status'])}
+                        className={`px-3 py-1 text-sm font-medium rounded-full border-2 transition-colors cursor-pointer ${
+                          selectedVideo.status === 'approved' ? 'bg-green-50 border-green-500 text-green-700' :
+                          selectedVideo.status === 'ready-for-review' ? 'bg-blue-50 border-blue-500 text-blue-700' :
+                          selectedVideo.status === 'needs-changes' ? 'bg-orange-50 border-orange-500 text-orange-700' :
+                          'bg-gray-50 border-gray-300 text-gray-600'
+                        }`}
+                      >
+                        <option value="draft">📝 Draft</option>
+                        <option value="ready-for-review">👀 Ready for Review</option>
+                        <option value="approved">✅ Approved</option>
+                        <option value="needs-changes">🔄 Needs Changes</option>
+                      </select>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleShareVideo}
+                      className="flex items-center gap-2"
+                    >
+                      <ShareIcon className="w-4 h-4" />
+                      Share
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mb-6">
+                  <span className="text-sm text-gray-600">by {selectedVideo.username}</span>
+                  <span className="text-gray-400">•</span>
+                  <span className="text-xs text-gray-500 font-mono">ID: {selectedVideo.id}</span>
+                  {selectedVideo.tags.length > 0 && (
+                    <>
+                      <span className="text-gray-400">•</span>
+                      <div className="flex gap-1">
+                        {selectedVideo.tags.map((tag, index) => (
+                          <button
+                            key={index}
+                            onClick={() => handleTagClick(tag)}
+                            className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded hover:bg-blue-200 transition-colors cursor-pointer"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className={`grid gap-6 ${isTheaterMode ? 'grid-cols-1' : 'lg:grid-cols-3'}`}>
+              {/* Video Player - Column1 */}
+              <div className={isTheaterMode ? 'w-full' : 'lg:col-span-2'}>
+                <Card className="p-4">
+                  <div ref={videoContainerRef} className="relative group bg-black rounded">
+                    <video
+                      ref={videoRef}
+                      crossOrigin="anonymous"
+                      preload="metadata"
+                      className="w-full rounded"
+                      style={{ maxHeight: isTheaterMode ? '70vh' : '480px' }}
+                      onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                      onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      onClick={handleTogglePlay}
+                      onError={handleVideoError}
+                      onCanPlay={handleVideoCanPlay}
+                      disablePictureInPicture
+                      controlsList="nodownload nofullscreen noremoteplayback"
+                      src={selectedVideo.url}
+                    >
+                      Your browser does not support the video tag.
+                    </video>
+                    
+                    {/* Video Error Message */}
+                    {videoError && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/90 rounded p-6">
+                        <div className="max-w-md text-center">
+                          <div className="text-red-500 mb-4">
+                            <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                          </div>
+                          <h3 className="text-xl font-bold text-white mb-2">Video Failed to Load</h3>
+                          <p className="text-gray-300 text-sm mb-4">{videoErrorMessage}</p>
+                          
+                          <div className="bg-gray-800 rounded-lg p-4 text-left text-sm text-gray-300 mb-4">
+                            <p className="font-semibold text-white mb-2">Troubleshooting steps:</p>
+                            <ul className="space-y-1 list-disc list-inside">
+                              <li>Hard refresh the page (Cmd+Shift+R or Ctrl+Shift+R)</li>
+                              <li>Clear your browser cache</li>
+                              <li>Try incognito/private mode</li>
+                              <li>Try a different browser</li>
+                              <li>Check if you're on a VPN and try disconnecting</li>
+                              <li>Try a different network (WiFi/mobile hotspot)</li>
+                              <li>Disable browser extensions (especially ad blockers)</li>
+                            </ul>
+                          </div>
+                          
+                          <div className="flex gap-2 justify-center">
+                            <Button
+                              onClick={() => {
+                                setVideoError(false)
+                                if (videoRef.current) {
+                                  videoRef.current.load()
+                                }
+                              }}
+                              className="bg-purple-600 hover:bg-purple-700"
+                            >
+                              Try Again
+                            </Button>
+                            <Button
+                              onClick={handleBackToLibrary}
+                              variant="outline"
+                              className="text-white border-gray-600 hover:bg-gray-800"
+                            >
+                              Back to Library
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Play Icon Overlay - Shows when paused or on hover */}
+                    {!isPlaying && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="bg-black/50 rounded-full p-6 group-hover:scale-110 transition-transform">
+                          <PlayIcon className="w-16 h-16 text-white" />
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Custom Controls Overlay */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {/* Progress Bar */}
+                      <div className="mb-3">
+                        <input
+                          type="range"
+                          min="0"
+                          max={videoDuration || 0}
+                          value={currentTime}
+                          onChange={(e) => handleSeekToTime(Number(e.target.value))}
+                          className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                        />
+                      </div>
+                      
+                      {/* Control Buttons */}
+                      <div className="flex items-center justify-between text-white">
+                        <div className="flex items-center gap-3">
+                          {/* Play/Pause */}
+                          <button onClick={handleTogglePlay} className="hover:text-purple-400 transition-colors">
+                            {isPlaying ? (
+                              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                              </svg>
+                            ) : (
+                              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"/>
+                              </svg>
+                            )}
+                          </button>
+                          
+                          {/* Volume */}
+                          <div className="flex items-center gap-2">
+                            <button onClick={handleToggleMute} className="hover:text-purple-400 transition-colors">
+                              {isMuted || volume === 0 ? (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                                </svg>
+                              ) : (
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                                </svg>
+                              )}
+                            </button>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.1"
+                              value={isMuted ? 0 : volume}
+                              onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                              className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                            />
+                          </div>
+                          
+                          {/* Time Display */}
+                          <span className="text-sm">
+                            {formatTime(currentTime)} / {formatTime(videoDuration)}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {/* Theater Mode Toggle */}
+                          <button 
+                            onClick={() => setIsTheaterMode(!isTheaterMode)}
+                            className="hover:text-purple-400 transition-colors"
+                            title={isTheaterMode ? 'Exit theater mode' : 'Enter theater mode'}
+                          >
+                            {isTheaterMode ? (
+                              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" strokeWidth={2} stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            ) : (
+                              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" strokeWidth={2} stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Hover overlay with Add Comment button */}
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 pointer-events-none">
+                      <div className={`absolute ${isTheaterMode ? 'top-4' : 'top-[30px]'} left-1/2 -translate-x-1/2`}>
+                        <Button
+                          onClick={handleStartAnnotation}
+                          className={`${isTheaterMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity duration-200 pointer-events-auto bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white shadow-lg`}
+                          size="lg"
+                        >
+                          <PlusIcon className="w-5 h-5 mr-2" />
+                          Add a comment
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Custom timeline with annotation markers */}
+                  {annotations.length > 0 && videoDuration > 0 && (
+                    <div className="mt-3">
+                      <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-visible">
+                        {/* Progress bar */}
+                        <div 
+                          className="absolute h-full bg-gray-400 rounded-full"
+                          style={{ width: `${(currentTime / videoDuration) * 100}%` }}
+                        />
+                        
+                        {/* Annotation markers */}
+                        {annotations.map((annotation) => {
+                          const percentage = (annotation.timestamp / videoDuration) * 100
+                          return (
+                            <div
+                              key={annotation.id}
+                              className="absolute group/marker"
+                              style={{ 
+                                left: `${percentage}%`,
+                                transform: 'translate(-50%, -25%)',
+                                top: '0'
+                              }}
+                            >
+                              <button
+                                className="w-3 h-3 bg-purple-600 rounded-full shadow-lg hover:scale-125 transition-transform cursor-pointer border-2 border-white relative z-10"
+                                onClick={() => handleSeekTo(annotation.timestamp)}
+                              />
+                              
+                              {/* Thumbnail preview on hover */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 opacity-0 group-hover/marker:opacity-100 transition-opacity pointer-events-none z-20">
+                                <div className="bg-white rounded-lg shadow-2xl p-2 border-2 border-purple-600">
+                                  <img 
+                                    src={annotation.editedScreenshot || annotation.screenshot} 
+                                    alt="Comment preview"
+                                    className="w-[260px] h-auto rounded"
+                                  />
+                                  <div className="mt-2 text-xs w-[260px]">
+                                    <p className="text-gray-600 line-clamp-2">{annotation.text}</p>
+                                    <p className="text-purple-600 font-medium mt-1">{formatTime(annotation.timestamp)}</p>
+                                  </div>
+                                </div>
+                                {/* Arrow pointing down */}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-purple-600"></div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1 text-center">
+                        {annotations.length} comment{annotations.length !== 1 ? 's' : ''} on timeline
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Tabs for Notes and Transcript */}
+                  {(selectedVideo.notes || selectedVideo.transcriptionStatus) && (
+                    <div className="mt-4">
+                      {/* Tab Headers */}
+                      <div className="flex border-b border-gray-200 relative">
+                        <button
+                          ref={notesTabRef}
+                          onClick={() => handleTabChange('notes')}
+                          className={`px-4 py-2 text-sm font-medium transition-colors relative z-10 ${
+                            activeTab === 'notes'
+                              ? 'text-purple-600'
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          Notes
+                        </button>
+                        <button
+                          ref={transcriptTabRef}
+                          onClick={() => handleTabChange('transcript')}
+                          className={`px-4 py-2 text-sm font-medium transition-colors relative z-10 ${
+                            activeTab === 'transcript'
+                              ? 'text-purple-600'
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          Transcription
+                          {selectedVideo.transcriptionStatus === 'processing' && (
+                            <span className="ml-2 inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                          )}
+                        </button>
+                        <button
+                          ref={summaryTabRef}
+                          onClick={() => handleTabChange('summary')}
+                          className={`px-4 py-2 text-sm font-medium transition-colors relative z-10 ${
+                            activeTab === 'summary'
+                              ? 'text-purple-600'
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          AI Summary
+                          {selectedVideo.aiSummaryStatus === 'processing' && (
+                            <span className="ml-2 inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                          )}
+                        </button>
+                        
+                        {/* Animated underline */}
+                        <div 
+                          className="absolute bottom-0 h-0.5 bg-purple-600 transition-all duration-300 ease-out"
+                          style={{
+                            width: `${tabUnderlineStyle.width}px`,
+                            transform: `translateX(${tabUnderlineStyle.left}px)`
+                          }}
+                        />
+                      </div>
+
+                      {/* Tab Content */}
+                      <div className="mt-4">
+                        {/* Notes Tab */}
+                        {activeTab === 'notes' && (
+                          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                            {isEditingNotes ? (
+                              <div>
+                                <textarea
+                                  value={editedNotes}
+                                  onChange={(e) => setEditedNotes(e.target.value)}
+                                  className="w-full min-h-[120px] p-3 text-sm text-gray-700 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
+                                  placeholder="Add any notes and URLs (optional)"
+                                  autoFocus
+                                />
+                                <div className="flex gap-2 mt-3">
+                                  <Button
+                                    onClick={handleSaveNotes}
+                                    size="sm"
+                                    className="bg-purple-600 hover:bg-purple-700"
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button
+                                    onClick={handleCancelEditingNotes}
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div 
+                                onClick={handleStartEditingNotes}
+                                className="cursor-pointer hover:bg-blue-100 transition-colors rounded p-2 -m-2 group"
+                                title="Click to edit notes"
+                              >
+                                {selectedVideo.notes ? (
+                                  <div className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                    {selectedVideo.notes.split(/(\bhttps?:\/\/[^\s]+)/g).map((part, index) => {
+                                      if (part.match(/^https?:\/\//)) {
+                                        return (
+                                          <a
+                                            key={index}
+                                            href={part}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-800 underline"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            {part}
+                                          </a>
+                                        )
+                                      }
+                                      return <span key={index}>{part}</span>
+                                    })}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-500 italic group-hover:text-gray-700">
+                                    No notes added. Click to add notes...
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Transcript Tab */}
+                        {activeTab === 'transcript' && (
+                          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                            {selectedVideo.transcriptionStatus === 'processing' && (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mr-3"></div>
+                                <span className="text-sm text-gray-600">Transcribing in progress...</span>
+                              </div>
+                            )}
+
+                            {selectedVideo.transcriptionStatus === 'failed' && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-red-600">Transcription failed. Please try re-uploading the video.</p>
+                              </div>
+                            )}
+
+                            {selectedVideo.transcriptionStatus === 'completed' && selectedVideo.transcript && (
+                              <div>
+                                <div className="text-sm text-gray-700 leading-relaxed">
+                                  {(showFullTranscript ? selectedVideo.transcript : selectedVideo.transcript.slice(0, 20)).map((segment, index) => (
+                                    <span key={index}>
+                                      <span
+                                        className="hover:bg-gray-100 px-1 rounded cursor-pointer transition-colors inline-block"
+                                        onClick={() => handleSeekTo(segment.start)}
+                                      >
+                                        <span className="text-xs text-gray-500 mr-1">
+                                          [{formatTime(segment.start)}]
+                                        </span>
+                                        <span>{segment.text}</span>
+                                      </span>
+                                      <br />
+                                    </span>
+                                  ))}
+                                </div>
+
+                                {selectedVideo.transcript.length > 20 && (
+                                  <button
+                                    onClick={() => setShowFullTranscript(!showFullTranscript)}
+                                    className="mt-4 text-sm text-purple-600 hover:text-purple-800 font-medium"
+                                  >
+                                    {showFullTranscript ? 'Show less' : `Show all ${selectedVideo.transcript.length} segments`}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {!selectedVideo.transcriptionStatus && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-gray-500 italic">No transcription available for this video.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* AI Summary Tab */}
+                        {activeTab === 'summary' && (
+                          <div className="p-4 bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-lg">
+                            {selectedVideo.aiSummaryStatus === 'processing' && (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mr-3"></div>
+                                <span className="text-sm text-gray-600">Generating AI summary...</span>
+                              </div>
+                            )}
+
+                            {selectedVideo.aiSummaryStatus === 'failed' && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-red-600">Failed to generate summary. Please try again.</p>
+                              </div>
+                            )}
+
+                            {selectedVideo.aiSummaryStatus === 'completed' && selectedVideo.aiSummary && (
+                              <div className="text-sm text-gray-700 prose prose-sm max-w-none">
+                                <div dangerouslySetInnerHTML={{ __html: selectedVideo.aiSummary.replace(/\n/g, '<br>') }} />
+                              </div>
+                            )}
+
+                            {!selectedVideo.aiSummaryStatus && selectedVideo.transcriptionStatus === 'completed' && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-gray-500 italic mb-4">AI summary not yet generated.</p>
+                                <p className="text-xs text-gray-400">Summary will be generated automatically after transcription completes.</p>
+                              </div>
+                            )}
+
+                            {!selectedVideo.transcriptionStatus && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-gray-500 italic">Transcription required before generating summary.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              </div>
+
+              {/* Annotations List */}
+              <div className={isTheaterMode ? 'w-full mt-6' : 'lg:col-span-1'}>
+                <Card className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold">
+                      Comments ({annotations.length})
+                    </h2>
+                    {annotations.length > 0 && (
+                      <button
+                        onClick={() => setAnnotationSortMode(prev => prev === 'timestamp' ? 'latest' : 'timestamp')}
+                        className="text-xs px-2 py-1 rounded bg-gradient-to-br from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 transition-all"
+                        title={annotationSortMode === 'timestamp' ? 'Click to sort by latest first' : 'Click to sort by timestamp'}
+                      >
+                        {annotationSortMode === 'timestamp' ? '⏱️ Timestamp' : '🕐 Latest'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-3 max-h-[700px] overflow-y-auto">
+                    {annotations.length === 0 ? (
+                      <p className="text-gray-500 text-sm text-center py-8">
+                        No annotations yet. Click "Add Comment" to create one!
+                      </p>
+                    ) : (
+                      <div className={isTheaterMode ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3' : 'space-y-3'}>
+                        {getSortedAnnotations().map((annotation, index) => (
+                        <div
+                          key={annotation.id}
+                          className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors animate-fade-in-up"
+                          style={{ animationDelay: `${index * 0.05}s` }}
+                        >
+                          {/* Screenshot */}
+                          {annotation.screenshot && (
+                            <div 
+                              className="relative cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => handleAnnotationClick(annotation)}
+                              title="Click to view/edit"
+                            >
+                              <img 
+                                src={annotation.editedScreenshot || annotation.screenshot} 
+                                alt="Video screenshot"
+                                className="w-full rounded mb-2"
+                              />
+                            </div>
+                          )}
+                          
+                          {/* Header */}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="flex-1">
+                              <button
+                                onClick={() => handleSeekTo(annotation.timestamp)}
+                                className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium text-sm"
+                              >
+                                <PlayIcon className="w-3 h-3" />
+                                {formatTime(annotation.timestamp)}
+                              </button>
+                              <p className="text-xs text-gray-500">
+                                by {annotation.username}
+                              </p>
+                            </div>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => handleShareAnnotation(annotation.id)}
+                                className="text-gray-500 hover:text-blue-600"
+                                title="Share annotation"
+                              >
+                                <ShareIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleAnnotationClick(annotation)}
+                                className="text-blue-500 hover:text-blue-700"
+                                title="Edit annotation"
+                              >
+                                <PencilIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAnnotation(annotation.id)}
+                                className="text-red-500 hover:text-red-700"
+                                title="Delete annotation"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                          
+                          {/* Comments section - Show pinned comments from Popup1 */}
+                          {annotation.comments && annotation.comments.length > 0 && (
+                            <div className="border-t pt-2 mt-2">
+                              <div className="flex items-center justify-between mb-2">
+                                <button
+                                  onClick={() => toggleAnnotationExpanded(annotation.id)}
+                                  className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800"
+                                >
+                                  <ChatBubbleLeftIcon className="w-3 h-3" />
+                                  {annotation.comments.filter(c => showResolvedComments || !c.resolved).length} comment{annotation.comments.filter(c => showResolvedComments || !c.resolved).length !== 1 ? 's' : ''}
+                                  {annotation.comments.filter(c => c.resolved).length > 0 && (
+                                    <span className="text-gray-500">
+                                      , {annotation.comments.filter(c => c.resolved).length} resolved
+                                    </span>
+                                  )}
+                                  {annotation.comments.some(c => isCommentNew(c.createdAt) && !c.resolved) && (
+                                    <span className="ml-1 px-1.5 py-0.5 bg-green-500 text-white text-[9px] rounded-full font-semibold">
+                                      NEW
+                                    </span>
+                                  )}
+                                </button>
+                                {annotation.comments.some(c => c.resolved) && (
+                                  <button
+                                    onClick={() => setShowResolvedComments(!showResolvedComments)}
+                                    className="text-[10px] text-gray-500 hover:text-gray-700"
+                                  >
+                                    {showResolvedComments ? 'Hide' : 'Show'} resolved
+                                  </button>
+                                )}
+                              </div>
+                              
+                              {expandedAnnotations.has(annotation.id) && (
+                                <div className="space-y-2">
+                                  {/* Display pinned comments from Popup1 */}
+                                  {annotation.comments
+                                    .filter(c => showResolvedComments || !c.resolved)
+                                    .map((comment) => (
+                                    <div key={comment.id} className={`bg-gray-50 p-2 rounded text-xs relative ${comment.resolved ? 'opacity-60' : ''}`}>
+                                      {isCommentNew(comment.createdAt) && !comment.resolved && (
+                                        <span className="absolute top-1 right-1 px-1.5 py-0.5 bg-green-500 text-white text-[9px] rounded-full font-semibold">
+                                          NEW
+                                        </span>
+                                      )}
+                                      <div className="flex-1">
+                                        <p className={`font-semibold text-gray-700 ${comment.resolved ? 'line-through' : ''}`}>{comment.username}</p>
+                                        <p className={`text-gray-600 ${comment.resolved ? 'line-through' : ''}`}>{comment.text}</p>
+                                        <p className="text-gray-400 text-[10px] mt-1">
+                                          {new Date(comment.createdAt).toLocaleString()}
+                                        </p>
+                                        <button
+                                          onClick={() => handleToggleCommentResolved(annotation.id, comment.id)}
+                                          className={`text-[10px] px-2 py-1 rounded mt-2 ${
+                                            comment.resolved 
+                                              ? 'bg-gray-200 text-gray-600 hover:bg-gray-300' 
+                                              : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                          }`}
+                                          title={comment.resolved ? 'Mark as unresolved' : 'Mark as resolved'}
+                                        >
+                                          {comment.resolved ? 'Reopen' : 'Resolve'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* Footer - shown on Home2 (library/my-videos) and Player1 (annotate) */}
+      {(viewMode === 'library' || viewMode === 'my-videos' || viewMode === 'annotate') && (
+        <footer className="fixed bottom-0 left-0 right-0 border-t border-gray-300 bg-white py-3">
+          <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs text-gray-600">
+            <a 
+              href="https://broadcast.amazon.com/videos/1813216" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:text-gray-900 transition-colors flex items-center gap-1"
+            >
+              <VideoCameraIcon className="w-4 h-4" />
+              Watch the Video Annotator tutorial
+            </a>
+            <a 
+              href="https://phonetool.amazon.com/users/jllevine" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:text-gray-900 transition-colors flex items-center gap-1"
+            >
+              <ChatBubbleLeftIcon className="w-4 h-4" />
+              Contact the author for feedback/suggestions
+            </a>
+            <button
+              onClick={() => setShowKeyboardHelp(true)}
+              className="hover:text-gray-900 transition-colors"
+            >
+              ⌨️ Keyboard shortcuts
+            </button>
+          </div>
+        </footer>
+      )}
+    </div>
+  )
+}
+
+export default App

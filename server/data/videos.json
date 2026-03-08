@@ -1,0 +1,57 @@
+[
+  {
+    "id": "1771290056666-62690733",
+    "filename": "videos/1771290056666-62690733.mp4",
+    "url": "https://your-video-annotation-bucket.s3.us-east-1.amazonaws.com/videos/1771290056666-62690733.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAWHGSUWQOFM3G7KIV%2F20260217%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260217T010058Z&X-Amz-Expires=86400&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEHgaCXVzLWVhc3QtMSJHMEUCIQCh9cP9uCbMOYyEpRcSDiozC2FPAjkBLuxN34ydephrtwIgWqtQNYqpIKcO1B9sSfDaujCpZZ%2BtuQERvWNAWYIaPgkqsAMIQBADGgw0Mjc3OTEwMDQ3MDAiDIlcVoZjHTtcRIJMdCqNA8D08ZCNDmajlzmQ%2Feaudbs4CexKeRV3Yxp1SpqVFB8Q9ixV0q3KrwRQFA%2BDNsmRHRfhqsUv3EAuVvHGmCVRpIkihW76keEummmEMnhzbjIvOrjyoyfL5xSHe%2FlQAkTqJvarnYGKsa2PZp3%2FaTgbfHGku3wxH%2FguWJIdWOXXXsZXXnhMqqGEDDQUjGyrNjFKr2XBvxtcDmWwW3VuDNuej%2FhD6f6dktOF7dV0LcOE5dZE7ryY0ZgFK2%2FO814fVccgpl9h%2BgWE0thdaB4wqzjoE2BgFU2EPzEa2D9mNLgmBk3mxf5sN3Htmd0ShBsbvoZTeSibnSfQ5K8epKsJNKOyF1nJSqzrgL%2BK98mJQaCXbKEIjGT2mLCEdMeguJSCxzuU5cpZ8DKEI7Jc74bn%2BLNMDktbrYi81ItX%2Fqd6rRqhIJKR1IheeAvsui5NDkVoT4DSv64a750Subx%2FcwurJy4hRSahvFho0kuMCh5B2H9V2L97queoc7SITaFVlBFmeYx6QDZMeui68Tv5RM7yay4wo8bOzAY6nQFLM56NE9NkDAMdBGiMOUgcIobQrTHbVBK8Ke5eJYBQIv7ETb6W9yUCpSF5lRU2yWO9eNEgRNFVet56VPuxHLCnacCiT53K3Z%2F84OETuItMMrTUO1ERVbqWs%2FUfdzkAZr%2F37idCmZa%2BqOJLpmUIPOErWzgHAp8A69l065h49T4%2FsUgFTUCWVmiPThNPgTKeAgBrkGM0CZL8gLmXng0F&X-Amz-Signature=18b2c4c2747b5391c355dfc710d44ea2b689cb2cc22000a4956094b11e309b26&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+    "s3Key": "videos/1771290056666-62690733.mp4",
+    "title": "The Office - The David Brent dance - BBCONDVDAU (360p, h264, youtube)",
+    "description": "",
+    "notes": "",
+    "tags": [],
+    "username": "test",
+    "uploadedAt": 1771290058584,
+    "size": 4773919,
+    "useS3": true,
+    "transcriptionStatus": "completed",
+    "transcriptionJobId": "transcribe-1771290056666-62690733-1771290058587",
+    "transcript": [
+      {
+        "start": 0.779,
+        "end": 3.059,
+        "text": "You know alright then mate well uh let's you know"
+      },
+      {
+        "start": 3.22,
+        "end": 4.929,
+        "text": "show her she moves No there's no beat is there"
+      },
+      {
+        "start": 5.099,
+        "end": 8.21,
+        "text": "Come on you can't you have music and everything Well"
+      },
+      {
+        "start": 8.27,
+        "end": 11.659,
+        "text": "let's let's uh well I just for charity just a"
+      },
+      {
+        "start": 11.659,
+        "end": 17.809,
+        "text": "little bit do do do do do do do That's"
+      },
+      {
+        "start": 20.42,
+        "end": 56.049,
+        "text": "Yeah OK Mm I Mm Mm mm mm mm Mm"
+      },
+      {
+        "start": 57.24,
+        "end": 59.88,
+        "text": "So and that's play Dave Yeah well"
+      }
+    ],
+    "aiSummaryStatus": "completed",
+    "aiSummary": "I apologize, but without the actual video file or a more complete transcript, I am unable to provide a meaningful analysis or summary. The provided transcript appears to be a fragment of a conversation with minimal context, making it difficult to discern the main topics and key takeaways. If you are able to provide the full video or a more comprehensive transcript, I would be happy to review it and provide a concise summary in the requested format."
+  }
+]

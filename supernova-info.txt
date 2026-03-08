@@ -1,0 +1,24 @@
+SuperNova Setup Information
+===========================
+
+AWS Account ID: 427791004700
+IAM Role ARN: arn:aws:iam::427791004700:role/Nova-DO-NOT-DELETE
+EC2 Instance ID: i-0af89297af85fcb5b
+EC2 IP Address: 3.81.247.175
+
+Next Steps:
+1. Create Bindle: https://bindles.amazon.com/v2/software_app/new
+2. Request Domain: https://supernova.amazon.dev
+3. Request Certificate: ./request-certificate.sh <domain-name>
+
+Bindle ID: [TO BE FILLED]
+Domain Name: [TO BE FILLED]
+Certificate ARN: [TO BE FILLED]
+
+Certificate ARN: arn:aws:acm:us-east-1:427791004700:certificate/deb42e9e-b46c-49d3-abc2-e93bf04b567f
+Domain Name: video-annotator.amazon.dev
+Validation Record: _1af39881906ae016b0b2bade6edcfe6b.video-annotator.amazon.dev. -> _2c2cd045322623fe94ec663178a49a5b.jkddzztszm.acm-validations.aws.
+
+Certificate ARN: arn:aws:acm:us-east-1:427791004700:certificate/8d6e8930-e838-4c97-9788-fc641a96e0e6
+Domain Name: video-annotator.amazon.dev
+Validation Record: _1af39881906ae016b0b2bade6edcfe6b.video-annotator.amazon.dev. -> _2c2cd045322623fe94ec663178a49a5b.jkddzztszm.acm-validations.aws.
