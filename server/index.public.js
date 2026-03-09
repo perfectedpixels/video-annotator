@@ -17,7 +17,7 @@ import multer from 'multer';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { uploadVideoToS3, getPresignedUrl, deleteVideoFromS3, isS3Configured } from './s3-service.js';
+import { uploadVideoToS3, getPresignedUrl, deleteVideoFromS3, streamVideoFromS3, isS3Configured } from './s3-service.js';
 import { startTranscriptionJob, getTranscriptionJobStatus, fetchTranscriptFromUri, isTranscribeConfigured } from './transcribe-service.js';
 import { generateVideoSummary } from './ai-summary-service.js';
 
@@ -190,7 +190,8 @@ app.post('/api/upload-video', (req, res) => {
       let videoUrl, s3Key = null;
       if (USE_S3) {
         s3Key = await uploadVideoToS3(req.file.buffer, filename, req.file.mimetype);
-        videoUrl = await getPresignedUrl(s3Key);
+        const baseUrl = getBaseUrl(req);
+        videoUrl = `${baseUrl}/api/video-proxy?key=${encodeURIComponent(s3Key)}`;
       } else {
         videoUrl = `http://localhost:${process.env.PORT || 3001}/uploads/${req.file.filename}`;
       }
@@ -230,6 +231,28 @@ app.post('/api/upload-video', (req, res) => {
   });
 });
 
+// Video proxy — streams from S3 to avoid CORS (no S3 CORS config needed)
+app.get('/api/video-proxy', async (req, res) => {
+  const key = req.query.key;
+  if (!key || !USE_S3) return res.status(400).json({ error: 'Missing key' });
+  try {
+    const obj = await streamVideoFromS3(key);
+    res.setHeader('Content-Type', obj.ContentType || 'video/mp4');
+    if (obj.ContentLength) res.setHeader('Content-Length', obj.ContentLength);
+    obj.Body.pipe(res);
+  } catch (err) {
+    console.error('Video proxy error:', err);
+    res.status(404).json({ error: 'Video not found' });
+  }
+});
+
+// Get base URL for proxy (Railway sets X-Forwarded-*)
+function getBaseUrl(req) {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host') || req.headers.host;
+  return `${proto}://${host}`;
+}
+
 // Get all videos
 app.get('/api/videos', async (req, res) => {
   const { username, search, workspace, archived } = req.query;
@@ -242,11 +265,12 @@ app.get('/api/videos', async (req, res) => {
   if (workspace) videos = videos.filter(v => v.workspace === workspace);
   const showArchived = archived === 'true';
   videos = videos.filter(v => showArchived ? v.archived === true : v.archived !== true);
+  const baseUrl = getBaseUrl(req);
   if (USE_S3) {
-    videos = await Promise.all(videos.map(async (video) => {
-      if (video.s3Key) return { ...video, url: await getPresignedUrl(video.s3Key) };
+    videos = videos.map((video) => {
+      if (video.s3Key) return { ...video, url: `${baseUrl}/api/video-proxy?key=${encodeURIComponent(video.s3Key)}` };
       return video;
-    }));
+    });
   }
   res.json({ success: true, videos: videos.reverse() });
 });
