@@ -486,7 +486,7 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
                 <video
                   src={video.url}
                   className="w-full h-full object-cover absolute inset-0 z-10"
-                  preload="metadata"
+                  preload="auto"
                   muted
                   playsInline
                   onError={(e) => {
