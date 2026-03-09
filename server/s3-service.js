@@ -107,13 +107,13 @@ export async function deleteVideoFromS3(s3Key) {
 /**
  * Stream video from S3 (for proxy - avoids CORS)
  * @param {string} s3Key - S3 object key
- * @returns {Promise<{Body: ReadableStream, ContentType?: string, ContentLength?: number}>}
+ * @param {string} [range] - Range header value (e.g. "bytes=0-1023")
+ * @returns {Promise<{Body: ReadableStream, ContentType?: string, ContentLength?: number, ContentRange?: string}>}
  */
-export async function streamVideoFromS3(s3Key) {
-  const command = new GetObjectCommand({
-    Bucket: BUCKET_NAME,
-    Key: s3Key
-  });
+export async function streamVideoFromS3(s3Key, range) {
+  const params = { Bucket: BUCKET_NAME, Key: s3Key };
+  if (range) params.Range = range;
+  const command = new GetObjectCommand(params);
   return s3Client.send(command);
 }
 

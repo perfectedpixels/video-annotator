@@ -478,12 +478,13 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
               onClick={() => onSelectVideo(video)}
             >
               {/* Video Thumbnail */}
-              <div className="relative bg-gray-900 aspect-video flex items-center justify-center">
+              <div className="relative bg-gray-900 aspect-video flex items-center justify-center overflow-hidden">
                 <video
                   src={video.url}
                   className="w-full h-full object-cover"
                   preload="metadata"
-                  crossOrigin="anonymous"
+                  muted
+                  playsInline
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                   <PlayIcon className="w-12 h-12 text-white" />

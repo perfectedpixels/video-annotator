@@ -235,9 +235,15 @@ app.post('/api/upload-video', (req, res) => {
 app.get('/api/video-proxy', async (req, res) => {
   const key = req.query.key;
   if (!key || !USE_S3) return res.status(400).json({ error: 'Missing key' });
+  const range = req.headers.range;
   try {
-    const obj = await streamVideoFromS3(key);
+    const obj = await streamVideoFromS3(key, range);
     res.setHeader('Content-Type', obj.ContentType || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (obj.ContentRange) {
+      res.status(206);
+      res.setHeader('Content-Range', obj.ContentRange);
+    }
     if (obj.ContentLength) res.setHeader('Content-Length', obj.ContentLength);
     obj.Body.pipe(res);
   } catch (err) {
