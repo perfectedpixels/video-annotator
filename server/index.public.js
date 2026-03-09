@@ -236,6 +236,10 @@ app.get('/api/video-proxy', async (req, res) => {
   const key = req.query.key;
   if (!key || !USE_S3) return res.status(400).json({ error: 'Missing key' });
   const range = req.headers.range;
+  const origin = req.headers.origin;
+  if (origin && normalizedOrigins.some(o => origin.replace(/\/$/, '') === o.replace(/\/$/, ''))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   try {
     const obj = await streamVideoFromS3(key, range);
     res.setHeader('Content-Type', obj.ContentType || 'video/mp4');
