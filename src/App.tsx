@@ -1415,12 +1415,8 @@ function App() {
         {/* Header */}
         <div className="bg-white/10 backdrop-blur-md rounded-xl p-5 mb-6 border border-white/20 shadow-2xl">
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-1">
-              <div className="relative">
-                <div className="absolute inset-0 bg-purple-400 blur-xl opacity-50 rounded-full"></div>
-                <img src="/icon-option-4.svg" alt="Video Annotator" className="w-12 h-12 relative z-10 drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
-              </div>
-              <h1 className="text-4xl font-extralight drop-shadow-lg lowercase tracking-wider text-[#a6ccdd]" style={{ transform: 'scaleX(0.85)' }}>
+            <div className="flex items-center">
+              <h1 className="text-4xl font-extrabold drop-shadow-lg lowercase tracking-wider text-[#a6ccdd]" style={{ transform: 'scaleX(0.85)' }}>
                 Video Annotator
               </h1>
             </div>
