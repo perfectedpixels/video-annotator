@@ -483,6 +483,7 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
                   src={video.url}
                   className="w-full h-full object-cover"
                   preload="metadata"
+                  crossOrigin="anonymous"
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                   <PlayIcon className="w-12 h-12 text-white" />

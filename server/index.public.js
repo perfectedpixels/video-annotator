@@ -30,9 +30,19 @@ console.log(`Storage mode: ${USE_S3 ? 'S3' : 'Local filesystem'}`);
 const app = express();
 
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim());
+const normalizedOrigins = allowedOrigins.map(o => o.replace(/\/$/, ''));
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const normalized = origin.replace(/\/$/, '');
+    const allowed = normalizedOrigins.some(o => o.replace(/\/$/, '') === normalized);
+    if (allowed) return cb(null, origin);
+    console.warn('CORS rejected:', origin, '| allowed:', normalizedOrigins);
+    cb(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Username']
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -345,6 +355,16 @@ io.on('connection', (socket) => {
 });
 
 // Health check
+// Debug: verify CORS and config (no secrets)
+app.get('/api/debug', (req, res) => {
+  res.json({
+    ok: true,
+    storage: USE_S3 ? 'S3' : 'local',
+    corsOrigins: normalizedOrigins,
+    requestOrigin: req.headers.origin || '(none)'
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: Date.now(), storage: USE_S3 ? 's3' : 'local', uptime: process.uptime() });
 });
