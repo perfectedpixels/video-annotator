@@ -190,8 +190,8 @@ app.post('/api/upload-video', (req, res) => {
       let videoUrl, s3Key = null;
       if (USE_S3) {
         s3Key = await uploadVideoToS3(req.file.buffer, filename, req.file.mimetype);
-        const baseUrl = getBaseUrl(req);
-        videoUrl = `${baseUrl}/api/video-proxy?key=${encodeURIComponent(s3Key)}`;
+        const baseUrl = getBaseUrl(req) || (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'] ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}` : null);
+        videoUrl = baseUrl ? `${baseUrl}/api/video-proxy?key=${encodeURIComponent(s3Key)}` : await getPresignedUrl(s3Key);
       } else {
         videoUrl = `http://localhost:${process.env.PORT || 3001}/uploads/${req.file.filename}`;
       }
@@ -252,11 +252,13 @@ app.get('/api/video-proxy', async (req, res) => {
   }
 });
 
-// Get base URL for proxy (Railway sets X-Forwarded-*)
+// Get base URL for proxy (Railway sets RAILWAY_PUBLIC_DOMAIN or X-Forwarded-*)
 function getBaseUrl(req) {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (domain) return `https://${domain}`;
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   const host = req.headers['x-forwarded-host'] || req.get('host') || req.headers.host;
-  return `${proto}://${host}`;
+  return host ? `${proto}://${host}` : null;
 }
 
 // Get all videos
@@ -271,12 +273,19 @@ app.get('/api/videos', async (req, res) => {
   if (workspace) videos = videos.filter(v => v.workspace === workspace);
   const showArchived = archived === 'true';
   videos = videos.filter(v => showArchived ? v.archived === true : v.archived !== true);
-  const baseUrl = getBaseUrl(req);
+  const baseUrl = getBaseUrl(req) || (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'] ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}` : null);
   if (USE_S3) {
-    videos = videos.map((video) => {
-      if (video.s3Key) return { ...video, url: `${baseUrl}/api/video-proxy?key=${encodeURIComponent(video.s3Key)}` };
-      return video;
-    });
+    if (baseUrl) {
+      videos = videos.map((video) => {
+        if (video.s3Key) return { ...video, url: `${baseUrl}/api/video-proxy?key=${encodeURIComponent(video.s3Key)}` };
+        return video;
+      });
+    } else {
+      videos = await Promise.all(videos.map(async (video) => {
+        if (video.s3Key) return { ...video, url: await getPresignedUrl(video.s3Key) };
+        return video;
+      }));
+    }
   }
   res.json({ success: true, videos: videos.reverse() });
 });
@@ -391,7 +400,9 @@ app.get('/api/debug', (req, res) => {
     ok: true,
     storage: USE_S3 ? 'S3' : 'local',
     corsOrigins: normalizedOrigins,
-    requestOrigin: req.headers.origin || '(none)'
+    requestOrigin: req.headers.origin || '(none)',
+    baseUrl: getBaseUrl(req),
+    railwayDomain: process.env.RAILWAY_PUBLIC_DOMAIN || '(not set)'
   });
 });
 

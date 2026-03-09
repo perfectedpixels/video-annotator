@@ -478,15 +478,22 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
               onClick={() => onSelectVideo(video)}
             >
               {/* Video Thumbnail */}
-              <div className="relative bg-gray-900 aspect-video flex items-center justify-center overflow-hidden">
+              <div className="relative bg-gray-800 aspect-video flex items-center justify-center overflow-hidden group">
+                {/* Placeholder (shows when video fails or before load) */}
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-700 to-gray-900 z-0">
+                  <VideoCameraIcon className="w-16 h-16 text-gray-500" />
+                </div>
                 <video
                   src={video.url}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover absolute inset-0 z-10"
                   preload="metadata"
                   muted
                   playsInline
+                  onError={(e) => {
+                    (e.target as HTMLVideoElement).style.display = 'none';
+                  }}
                 />
-                <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-20 pointer-events-none">
                   <PlayIcon className="w-12 h-12 text-white" />
                 </div>
               </div>
