@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PlayIcon, TrashIcon, MagnifyingGlassIcon, VideoCameraIcon, PencilIcon, XMarkIcon, ChatBubbleLeftIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon } from '@heroicons/react/24/outline'
 import { Button } from './ui/button'
 import { Card } from './ui/card'
@@ -31,6 +31,42 @@ interface VideoLibraryProps {
   filterByUser?: boolean
   workspace?: string | null
   onSelectVideo: (video: Video) => void
+}
+
+/** Lazy-loads video src only when in viewport; uses metadata preload for thumbnail (not full video) */
+function LazyVideoThumbnail({ url }: { url: string }) {
+  const [isVisible, setIsVisible] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setIsVisible(true)
+      },
+      { rootMargin: '100px', threshold: 0.01 }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 z-10">
+      {isVisible && (
+        <video
+          src={url}
+          className="w-full h-full object-cover absolute inset-0"
+          preload="metadata"
+          muted
+          playsInline
+          onError={(e) => {
+            (e.target as HTMLVideoElement).style.display = 'none'
+          }}
+        />
+      )}
+    </div>
+  )
 }
 
 export function VideoLibrary({ username, filterByUser = false, workspace = null, onSelectVideo }: VideoLibraryProps) {
@@ -483,16 +519,7 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-700 to-gray-900 z-0">
                   <VideoCameraIcon className="w-16 h-16 text-gray-500" />
                 </div>
-                <video
-                  src={video.url}
-                  className="w-full h-full object-cover absolute inset-0 z-10"
-                  preload="auto"
-                  muted
-                  playsInline
-                  onError={(e) => {
-                    (e.target as HTMLVideoElement).style.display = 'none';
-                  }}
-                />
+                <LazyVideoThumbnail url={video.url} />
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-20 pointer-events-none">
                   <PlayIcon className="w-12 h-12 text-white" />
                 </div>
