@@ -63,7 +63,7 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
       }
       params.append('archived', showArchived.toString())
 
-      const response = await fetch(`${API_BASE_URL}/api/videos?${params}`)
+      const response = await fetch(`${API_BASE_URL}/api/videos?${params}`, { cache: 'no-store' })
       const data = await response.json()
       
       if (data.success) {

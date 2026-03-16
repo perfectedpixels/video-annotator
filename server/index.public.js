@@ -279,18 +279,22 @@ app.get('/api/videos', async (req, res) => {
   videos = videos.filter(v => showArchived ? v.archived === true : v.archived !== true);
   const baseUrl = getBaseUrl(req) || (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-host'] ? `${req.headers['x-forwarded-proto']}://${req.headers['x-forwarded-host']}` : null);
   if (USE_S3) {
+    const getS3Key = (v) => v.s3Key || (v.useS3 && v.filename && String(v.filename).startsWith('videos/') ? v.filename : null);
     if (baseUrl) {
       videos = videos.map((video) => {
-        if (video.s3Key) return { ...video, url: `${baseUrl}/api/video-proxy?key=${encodeURIComponent(video.s3Key)}` };
+        const key = getS3Key(video);
+        if (key) return { ...video, url: `${baseUrl}/api/video-proxy?key=${encodeURIComponent(key)}` };
         return video;
       });
     } else {
       videos = await Promise.all(videos.map(async (video) => {
-        if (video.s3Key) return { ...video, url: await getPresignedUrl(video.s3Key) };
+        const key = getS3Key(video);
+        if (key) return { ...video, url: await getPresignedUrl(key) };
         return video;
       }));
     }
   }
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ success: true, videos: videos.reverse() });
 });
 
