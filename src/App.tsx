@@ -1416,7 +1416,7 @@ function App() {
         <div className="bg-white/10 backdrop-blur-md rounded-xl p-5 mb-6 border border-white/20 shadow-2xl">
           <div className="flex justify-between items-center">
             <div className="flex items-center">
-              <h1 className="font-quicksand text-4xl font-extrabold drop-shadow-lg lowercase tracking-wider bg-gradient-to-r from-white via-[#a6ccdd] to-white bg-clip-text text-transparent" style={{ transform: 'scaleX(0.85)' }}>
+              <h1 className="font-title text-4xl font-extrabold drop-shadow-lg lowercase tracking-wider bg-gradient-to-r from-white via-[#a6ccdd] to-white bg-clip-text text-transparent" style={{ transform: 'scaleX(0.85)' }}>
                 Video Annotator
               </h1>
             </div>

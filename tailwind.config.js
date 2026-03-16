@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        quicksand: ['Quicksand', 'sans-serif'],
+        title: ['Source Sans 3', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
