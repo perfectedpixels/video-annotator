@@ -17,7 +17,7 @@ import multer from 'multer';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { uploadVideoToS3, getPresignedUrl, deleteVideoFromS3, streamVideoFromS3, isS3Configured } from './s3-service.js';
+import { uploadVideoToS3, getPresignedUrl, deleteVideoFromS3, streamVideoFromS3, listVideosFromS3, isS3Configured } from './s3-service.js';
 import { startTranscriptionJob, getTranscriptionJobStatus, fetchTranscriptFromUri, isTranscribeConfigured } from './transcribe-service.js';
 import { generateVideoSummary } from './ai-summary-service.js';
 
@@ -122,6 +122,42 @@ async function savePersistedData() {
 }
 
 await loadPersistedData();
+if (USE_S3) {
+  try {
+    const s3Videos = await listVideosFromS3();
+    const existingKeys = new Set(
+      (global.videos || []).map((v) => v.s3Key || (v.filename && String(v.filename).startsWith('videos/') ? v.filename : null)).filter(Boolean)
+    );
+    let recovered = 0;
+    for (const { key, size } of s3Videos) {
+      if (existingKeys.has(key)) continue;
+      const basename = key.replace(/^videos\//, '').replace(/\.[^.]+$/, '');
+      const videoId = basename || key;
+      global.videos.push({
+        id: videoId,
+        filename: key,
+        url: '',
+        s3Key: key,
+        title: `Recovered: ${basename}`,
+        description: '',
+        tags: [],
+        username: 'recovered',
+        workspace: null,
+        uploadedAt: Date.now(),
+        size: size || 0,
+        useS3: true
+      });
+      existingKeys.add(key);
+      recovered++;
+    }
+    if (recovered > 0) {
+      await savePersistedData();
+      console.log(`Recovered ${recovered} videos from S3`);
+    }
+  } catch (err) {
+    console.error('Startup S3 sync failed:', err);
+  }
+}
 setInterval(savePersistedData, 5 * 60 * 1000);
 process.on('SIGINT', async () => { await savePersistedData(); process.exit(0); });
 process.on('SIGTERM', async () => { await savePersistedData(); process.exit(0); });
@@ -239,6 +275,7 @@ app.get('/api/video-proxy', async (req, res) => {
   const origin = req.headers.origin;
   if (origin && normalizedOrigins.some(o => origin.replace(/\/$/, '') === o.replace(/\/$/, ''))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
   }
   try {
     const obj = await streamVideoFromS3(key, range);
@@ -253,6 +290,47 @@ app.get('/api/video-proxy', async (req, res) => {
   } catch (err) {
     console.error('Video proxy error:', err);
     res.status(404).json({ error: 'Video not found' });
+  }
+});
+
+// Sync videos from S3 — recover videos that exist in S3 but were lost from metadata
+app.post('/api/sync-videos-from-s3', async (req, res) => {
+  if (!USE_S3) return res.status(400).json({ success: false, error: 'S3 not configured' });
+  try {
+    const s3Videos = await listVideosFromS3();
+    const existingKeys = new Set(
+      (global.videos || [])
+        .map((v) => v.s3Key || (v.filename && String(v.filename).startsWith('videos/') ? v.filename : null))
+        .filter(Boolean)
+    );
+    let added = 0;
+    for (const { key, size } of s3Videos) {
+      if (existingKeys.has(key)) continue;
+      const basename = key.replace(/^videos\//, '').replace(/\.[^.]+$/, '');
+      const videoId = basename || key;
+      const videoMetadata = {
+        id: videoId,
+        filename: key,
+        url: '',
+        s3Key: key,
+        title: `Recovered: ${basename}`,
+        description: '',
+        tags: [],
+        username: 'recovered',
+        workspace: null,
+        uploadedAt: Date.now(),
+        size: size || 0,
+        useS3: true
+      };
+      global.videos.push(videoMetadata);
+      existingKeys.add(key);
+      added++;
+    }
+    await savePersistedData();
+    res.json({ success: true, added, total: global.videos.length });
+  } catch (err) {
+    console.error('Sync from S3 error:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -1825,7 +1825,6 @@ function App() {
                     <video
                       ref={videoRef}
                       controls
-                      crossOrigin="anonymous"
                       preload="metadata"
                       autoPlay={audioAutoplay}
                       className="w-full rounded"

@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getSignedUrl as getCloudfrontSignedUrl } from '@aws-sdk/cloudfront-signer';
 import fs from 'fs';
@@ -115,6 +115,34 @@ export async function streamVideoFromS3(s3Key, range) {
   if (range) params.Range = range;
   const command = new GetObjectCommand(params);
   return s3Client.send(command);
+}
+
+/**
+ * List all video objects in S3 (videos/ prefix)
+ * @returns {Promise<Array<{key: string, size: number, lastModified: Date}>>}
+ */
+export async function listVideosFromS3() {
+  const results = [];
+  let continuationToken;
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: 'videos/',
+      ContinuationToken: continuationToken
+    });
+    const response = await s3Client.send(command);
+    for (const obj of response.Contents || []) {
+      if (obj.Key && !obj.Key.endsWith('/')) {
+        results.push({
+          key: obj.Key,
+          size: obj.Size || 0,
+          lastModified: obj.LastModified
+        });
+      }
+    }
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+  return results;
 }
 
 /**

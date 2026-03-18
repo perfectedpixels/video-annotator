@@ -47,6 +47,23 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
   const [annotationCounts, setAnnotationCounts] = useState<AnnotationCounts>({})
   const [lastUpdated, setLastUpdated] = useState<LastUpdated>({})
   const [showArchived, setShowArchived] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+
+  const syncFromS3 = async () => {
+    setIsSyncing(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/sync-videos-from-s3`, { method: 'POST' })
+      const data = await res.json()
+      if (data.success && data.added > 0) {
+        fetchVideos()
+        fetchAnnotationCounts()
+      }
+    } catch (e) {
+      console.error('Sync failed:', e)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
   const fetchVideos = async () => {
     setIsLoading(true)
@@ -459,7 +476,7 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
         <Card className="p-12 text-center">
           <VideoCameraIcon className="w-16 h-16 mx-auto mb-4 text-gray-400" />
           <h3 className="text-lg font-semibold mb-2">No videos found</h3>
-          <p className="text-gray-600">
+          <p className="text-gray-600 mb-4">
             {filterByUser 
               ? "You haven't uploaded any videos yet" 
               : searchQuery 
@@ -468,6 +485,16 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
                   ? "No archived videos"
                   : "No videos have been uploaded yet"}
           </p>
+          {!filterByUser && !searchQuery && !showArchived && (
+            <Button
+              onClick={syncFromS3}
+              disabled={isSyncing}
+              variant="outline"
+              className="bg-white/20 text-white border-white/30 hover:bg-white/30"
+            >
+              {isSyncing ? 'Syncing...' : 'Recover videos from S3'}
+            </Button>
+          )}
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
