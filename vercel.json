@@ -3,6 +3,10 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
+    {
+      "source": "/api/video-proxy",
+      "destination": "https://video-annotator-production.up.railway.app/api/video-proxy"
+    },
     { "source": "/((?!api|assets|uploads).*)", "destination": "/index.html" }
   ]
 }

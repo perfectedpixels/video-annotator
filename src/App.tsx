@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { PlayIcon, TrashIcon, ChatBubbleLeftIcon, ArrowDownTrayIcon, PlusIcon, VideoCameraIcon, ShareIcon, PencilIcon, ArrowUpTrayIcon, XMarkIcon, SpeakerWaveIcon } from '@heroicons/react/24/outline'
 import { Button } from './components/ui/button'
@@ -10,6 +10,7 @@ import { VideoUploadForm } from './components/VideoUploadForm'
 import { VideoLibrary } from './components/VideoLibrary'
 import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer } from 'docx'
 import { SOCKET_URL, API_BASE_URL } from './config'
+import { getVideoUrl } from './utils/videoUrl'
 import { saveAs } from 'file-saver'
 
 interface Comment {
@@ -256,6 +257,14 @@ function App() {
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showDownloadMenu])
+
+  // Set video source (same-origin proxy when deployed avoids Safari/Firefox canvas taint)
+  useLayoutEffect(() => {
+    const video = videoRef.current
+    if (!video || !selectedVideo?.url || viewMode !== 'annotate') return
+    video.crossOrigin = 'anonymous'
+    video.src = getVideoUrl(selectedVideo.url)
+  }, [selectedVideo?.id, selectedVideo?.url, viewMode])
 
   // Socket.io connection
   useEffect(() => {
@@ -807,8 +816,33 @@ function App() {
     
     const video = videoRef.current
     
+    // Wait for video to have a frame (required for cross-origin canvas capture)
+    if (video.readyState < 2) {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Video load timeout')), 5000)
+        video.addEventListener('loadeddata', () => { clearTimeout(timeout); resolve() }, { once: true })
+        video.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('Video failed to load')) }, { once: true })
+      })
+    }
+
+    // Safari requires 'seeked' before frame is available for canvas (see Safari frame extraction docs)
+    const t = video.currentTime
+    video.currentTime = t + 0.001
+    await new Promise<void>((resolve) => {
+      const done = () => resolve()
+      const timeout = setTimeout(done, 2000)
+      video.addEventListener('seeked', () => { clearTimeout(timeout); done() }, { once: true })
+    })
+    video.currentTime = t
+    await new Promise<void>((resolve) => {
+      const done = () => resolve()
+      const timeout = setTimeout(done, 2000)
+      video.addEventListener('seeked', () => { clearTimeout(timeout); done() }, { once: true })
+    })
+    
     // Optimize resolution to match dialog width (max-w-7xl = 1280px)
     // This reduces file size and matches the display resolution
+    if (video.videoWidth === 0 || video.videoHeight === 0) return ''
     const maxWidth = 1280
     const aspectRatio = video.videoWidth / video.videoHeight
     
@@ -852,6 +886,10 @@ function App() {
     
     // Capture screenshot
     const screenshot = await captureScreenshot()
+    if (!screenshot || screenshot.length < 100) {
+      alert('Screenshot failed. The video may not be fully loaded yet—try waiting a moment—or your domain may need to be added to Railway CORS_ORIGIN.')
+      return
+    }
     setNewAnnotationScreenshot(screenshot)
     setIsCreatingAnnotation(true)
   }
@@ -1087,8 +1125,8 @@ function App() {
     if (!selectedVideo) return
     
     try {
-      // Fetch the video as a blob
-      const response = await fetch(selectedVideo.url)
+      // Fetch the video as a blob (use same-origin proxy when deployed)
+      const response = await fetch(getVideoUrl(selectedVideo.url))
       const blob = await response.blob()
       
       // Create download link
@@ -1104,7 +1142,7 @@ function App() {
       console.error('Error downloading video:', error)
       // Fallback to direct link
       const link = document.createElement('a')
-      link.href = selectedVideo.url
+      link.href = getVideoUrl(selectedVideo.url)
       link.download = `${selectedVideo.title}.${selectedVideo.filename.split('.').pop()}`
       link.setAttribute('target', '_blank')
       link.click()
@@ -1823,9 +1861,11 @@ function App() {
                 <Card className="p-4">
                   <div ref={videoContainerRef} className="relative group bg-black rounded">
                     <video
+                      key={selectedVideo.id}
                       ref={videoRef}
                       controls
-                      preload="metadata"
+                      crossOrigin="anonymous"
+                      preload="auto"
                       autoPlay={audioAutoplay}
                       className="w-full rounded"
                       style={{ maxHeight: isTheaterMode ? '70vh' : '480px' }}
@@ -1837,7 +1877,6 @@ function App() {
                       onCanPlay={handleVideoCanPlay}
                       disablePictureInPicture
                       controlsList="nodownload nofullscreen noremoteplayback"
-                      src={selectedVideo.url}
                     >
                       Your browser does not support the video tag.
                     </video>

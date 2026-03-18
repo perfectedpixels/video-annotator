@@ -18,11 +18,13 @@ Use this checklist to verify all URLs and environment variables are correctly co
 User → annotator.perfectpixels.com (GoDaddy DNS)
          ↓ CNAME
        Vercel (serves React frontend)
-         ↓ VITE_API_URL
-       Railway (Node.js API + video proxy)
+         ├─ VITE_API_URL → Railway (API, socket)
+         └─ /api/video-proxy → Railway (video proxy) [same-origin, fixes Safari/Firefox]
          ↓ AWS credentials
        S3 (video storage)
 ```
+
+**Why video proxy through Vercel?** Safari and Firefox can fail on cross-origin video (thumbnails, canvas screenshot). Proxying video through the same domain (`annotator.perfectpixels.com/api/video-proxy`) makes it same-origin, so thumbnails and screenshots work. The `vercel.json` rewrite must point to your Railway URL.
 
 ---
 
@@ -141,6 +143,7 @@ fetch('https://YOUR-RAILWAY-URL.up.railway.app/api/current-user', {credentials: 
 | Videos don't load | S3 bucket or proxy URL wrong | Check Railway `AWS_S3_BUCKET`, `RAILWAY_PUBLIC_DOMAIN` |
 | Preview deploy works, custom domain doesn't | Domain not in Vercel, or DNS wrong | Add domain in Vercel Domains, fix GoDaddy CNAME |
 | Video thumbnails show placeholder (camera icon) | CORS_ORIGIN missing frontend URL | Add frontend URL to Railway CORS_ORIGIN. See `VIDEO_CONNECTION_TROUBLESHOOTING.md` |
+| Thumbnails/Screenshot work in Firefox but not Safari | Cross-origin video + Safari strict CORS | Ensure `vercel.json` rewrites `/api/video-proxy` to your Railway URL. Video loads same-origin. |
 
 ---
 
@@ -155,3 +158,4 @@ fetch('https://YOUR-RAILWAY-URL.up.railway.app/api/current-user', {credentials: 
 **Action:** Copy your Railway URL from Railway dashboard → Variables or Deployments, then ensure:
 - Vercel `VITE_API_URL` = that Railway URL
 - Railway `CORS_ORIGIN` includes both `https://annotator.perfectpixels.com` and your Vercel URL
+- **vercel.json** rewrite: `/api/video-proxy` destination = `https://YOUR-RAILWAY-URL.up.railway.app/api/video-proxy` (must match your Railway URL)

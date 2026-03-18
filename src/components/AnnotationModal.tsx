@@ -126,19 +126,43 @@ export function AnnotationModal({ annotation, currentUsername, onClose, onSave }
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    const src = annotation.editedScreenshot || annotation.screenshot
+    if (!src) {
+      canvas.width = 400
+      canvas.height = 225
+      ctx.fillStyle = '#f0f0f0'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#666'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('Screenshot unavailable', canvas.width / 2, canvas.height / 2)
+      setUndoStack([{ imageData: ctx.getImageData(0, 0, canvas.width, canvas.height) }])
+      setRedoStack([])
+      return
+    }
+
     const img = new Image()
     img.onload = () => {
-      // Maintain aspect ratio - use original dimensions
       canvas.width = img.width
       canvas.height = img.height
       ctx.drawImage(img, 0, 0)
-      
-      // Save initial state for undo
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       setUndoStack([{ imageData }])
       setRedoStack([])
     }
-    img.src = annotation.editedScreenshot || annotation.screenshot
+    img.onerror = () => {
+      canvas.width = 400
+      canvas.height = 225
+      ctx.fillStyle = '#f0f0f0'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#666'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('Screenshot failed to load', canvas.width / 2, canvas.height / 2)
+      setUndoStack([{ imageData: ctx.getImageData(0, 0, canvas.width, canvas.height) }])
+      setRedoStack([])
+    }
+    img.src = src
   }, [annotation])
 
   const getRandomColor = () => {

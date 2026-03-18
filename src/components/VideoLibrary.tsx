@@ -3,6 +3,7 @@ import { PlayIcon, TrashIcon, MagnifyingGlassIcon, VideoCameraIcon, PencilIcon, 
 import { Button } from './ui/button'
 import { Card } from './ui/card'
 import { API_BASE_URL } from '../config'
+import { getVideoUrl } from '../utils/videoUrl'
 
 interface Video {
   id: string
@@ -141,20 +142,27 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/videos/${deleteConfirm.videoId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        credentials: 'include'
       })
       
-      const data = await response.json()
+      let data: { success?: boolean; error?: string }
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error(response.status === 404 ? 'Video not found' : `Server error (${response.status})`)
+      }
       
       if (data.success) {
         setVideos(videos.filter(v => v.id !== deleteConfirm.videoId))
         setDeleteConfirm(null)
       } else {
-        alert('Failed to delete video: ' + data.error)
+        alert('Failed to delete video: ' + (data.error || 'Unknown error'))
       }
     } catch (error) {
       console.error('Delete error:', error)
-      alert('Failed to delete video')
+      const msg = error instanceof Error ? error.message : 'Failed to delete video'
+      alert(msg.includes('fetch') || msg.includes('Failed') ? 'Delete failed. Check that the API URL is correct and CORS allows your domain.' : msg)
     }
   }
 
@@ -511,9 +519,9 @@ export function VideoLibrary({ username, filterByUser = false, workspace = null,
                   <VideoCameraIcon className="w-16 h-16 text-gray-500" />
                 </div>
                 <video
-                  src={video.url}
+                  src={getVideoUrl(video.url, true)}
                   className="w-full h-full object-cover absolute inset-0 z-10"
-                  preload="auto"
+                  preload="metadata"
                   muted
                   playsInline
                   onError={(e) => {
